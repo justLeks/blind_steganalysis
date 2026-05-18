@@ -23,7 +23,7 @@ from read_changes import SUPPORTED_PROBE_DISTRIBUTIONS, sample_pixel_indices
 # Edit these settings and run: python3 visual_attack_test.py
 COVER_ROOT = Path("ALASKA_v2_TIFF_512_GrayScale_50")
 COVER_IMAGE = COVER_ROOT / "00001.tif"
-OUTPUT_ROOT = Path("out/visual_attack_test")
+OUTPUT_ROOT = Path("experiments/visual_attack_test")
 TEST_NAME = "single_image_visual_attack"
 
 METHOD = "HUGO"

@@ -14,7 +14,7 @@ from read_changes import load_change_record, sample_pixel_indices
 # Edit these settings and run: python3 generate_test_images.py
 EXPERIMENT_ROOT = Path("experiments/multi_method_alpha")
 COVER_ROOT = Path("ALASKA_v2_TIFF_512_GrayScale_50")
-OUTPUT_ROOT = Path("paper_outputs/test_images")
+OUTPUT_ROOT = Path("experiments/test_images")
 
 EXAMPLES = [
     {"method": "HUGO", "alpha": 0.3, "image_stem": "00001", "attack_budget": 20000},
