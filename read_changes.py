@@ -1,4 +1,5 @@
 import argparse
+import csv
 import json
 from pathlib import Path
 
@@ -12,7 +13,9 @@ SUPPORTED_PROBE_DISTRIBUTIONS = {
     "center_gaussian",
     "center_laplace",
     "edge_gaussian",
+    "texture_energy",
 }
+SUPPORTED_PROBE_IMAGE_SOURCES = {"cover", "stego"}
 
 
 def iter_record_paths(input_path: str | Path) -> list[Path]:
@@ -109,10 +112,55 @@ def _resolve_positive_scale(
     return value
 
 
+def _resolve_nonnegative_value(
+    params: dict | None,
+    key: str,
+    fallback_value: float,
+) -> float:
+    value = float((params or {}).get(key, fallback_value))
+    if value < 0:
+        raise ValueError(f"Expected '{key}' to be non-negative, got {value}.")
+    return value
+
+
+def build_texture_energy_probabilities(
+    sampling_image: np.ndarray,
+    distribution_params: dict | None = None,
+) -> np.ndarray:
+    params = distribution_params or {}
+    gamma = _resolve_positive_scale(params, "gamma", 1.0)
+    floor = _resolve_nonnegative_value(params, "floor", 1e-6)
+
+    image = sampling_image.astype(np.float32, copy=False)
+
+    gradient_x = np.zeros_like(image, dtype=np.float32)
+    gradient_y = np.zeros_like(image, dtype=np.float32)
+    gradient_x[:, 1:] = np.abs(image[:, 1:] - image[:, :-1])
+    gradient_y[1:, :] = np.abs(image[1:, :] - image[:-1, :])
+
+    laplacian = np.zeros_like(image, dtype=np.float32)
+    laplacian[1:-1, 1:-1] = np.abs(
+        4.0 * image[1:-1, 1:-1]
+        - image[:-2, 1:-1]
+        - image[2:, 1:-1]
+        - image[1:-1, :-2]
+        - image[1:-1, 2:]
+    )
+
+    energy = gradient_x + gradient_y + laplacian
+    weights = (energy + floor) ** gamma
+    flat_weights = weights.reshape(-1).astype(np.float64, copy=False)
+    weight_sum = float(flat_weights.sum())
+    if weight_sum <= 0:
+        raise ValueError("Texture-energy probing produced non-positive total weight.")
+    return flat_weights / weight_sum
+
+
 def build_sampling_probabilities(
     image_shape: tuple[int, int],
     distribution: str,
     distribution_params: dict | None = None,
+    sampling_image: np.ndarray | None = None,
 ) -> np.ndarray | None:
     height, width = image_shape
     if distribution == "uniform":
@@ -123,6 +171,19 @@ def build_sampling_probabilities(
     cols = np.arange(width, dtype=np.float64)[None, :]
     center_row = 0.5 * (height - 1)
     center_col = 0.5 * (width - 1)
+
+    if distribution == "texture_energy":
+        if sampling_image is None:
+            raise ValueError("Texture-energy probing requires a sampling image.")
+        if tuple(sampling_image.shape) != tuple(image_shape):
+            raise ValueError(
+                "Sampling image shape does not match the recorded image shape: "
+                f"{sampling_image.shape} vs {image_shape}"
+            )
+        return build_texture_energy_probabilities(
+            sampling_image=sampling_image,
+            distribution_params=params,
+        )
 
     if distribution == "center_gaussian":
         sigma_row = _resolve_positive_scale(params, "sigma_row", 0.2 * height)
@@ -154,6 +215,17 @@ def build_sampling_probabilities(
     return flat_weights / weight_sum
 
 
+def validate_sample_count(image_shape: tuple[int, int], sample_count: int) -> int:
+    total_pixels = image_shape[0] * image_shape[1]
+    if sample_count < 0:
+        raise ValueError("sample_count must be non-negative.")
+    if sample_count > total_pixels:
+        raise ValueError(
+            f"sample_count={sample_count} exceeds the number of pixels ({total_pixels})."
+        )
+    return total_pixels
+
+
 def sample_pixel_labels(
     image_shape: tuple[int, int],
     changed_flat_indices: np.ndarray,
@@ -161,27 +233,25 @@ def sample_pixel_labels(
     seed: int,
     distribution: str = "uniform",
     distribution_params: dict | None = None,
+    sampling_image: np.ndarray | None = None,
 ) -> np.ndarray:
     height, width = image_shape
-    total_pixels = height * width
-    if sample_count < 0:
-        raise ValueError("sample_count must be non-negative.")
-    if sample_count > total_pixels:
-        raise ValueError(
-            f"sample_count={sample_count} exceeds the number of pixels ({total_pixels})."
-        )
+    total_pixels = validate_sample_count(image_shape, sample_count)
 
-    rng = np.random.default_rng(seed)
     probabilities = build_sampling_probabilities(
         image_shape=image_shape,
         distribution=distribution,
         distribution_params=distribution_params,
+        sampling_image=sampling_image,
     )
-    sampled_flat_indices = rng.choice(
-        total_pixels,
-        size=sample_count,
-        replace=False,
-        p=probabilities,
+    sampled_flat_indices = sample_pixel_indices(
+        image_shape=image_shape,
+        sample_count=sample_count,
+        seed=seed,
+        distribution=distribution,
+        distribution_params=distribution_params,
+        sampling_image=sampling_image,
+        probabilities=probabilities,
     )
     changed_lookup = np.zeros(total_pixels, dtype=np.uint8)
     changed_lookup[changed_flat_indices] = 1
@@ -192,12 +262,41 @@ def sample_pixel_labels(
     return np.column_stack((rows, cols, labels))
 
 
+def sample_pixel_indices(
+    image_shape: tuple[int, int],
+    sample_count: int,
+    seed: int,
+    distribution: str = "uniform",
+    distribution_params: dict | None = None,
+    sampling_image: np.ndarray | None = None,
+    probabilities: np.ndarray | None = None,
+) -> np.ndarray:
+    total_pixels = validate_sample_count(image_shape, sample_count)
+
+    rng = np.random.default_rng(seed)
+    if probabilities is None:
+        probabilities = build_sampling_probabilities(
+            image_shape=image_shape,
+            distribution=distribution,
+            distribution_params=distribution_params,
+            sampling_image=sampling_image,
+        )
+    sampled_flat_indices = rng.choice(
+        total_pixels,
+        size=sample_count,
+        replace=False,
+        p=probabilities,
+    )
+    return sampled_flat_indices.astype(np.int64, copy=False)
+
+
 def audit_samples(
     record: dict,
     sample_count: int,
     seed: int | None,
     distribution: str = "uniform",
     distribution_params: dict | None = None,
+    sampling_image: np.ndarray | None = None,
 ) -> np.ndarray:
     audit_seed = record["seed"] if seed is None else seed
     return sample_pixel_labels(
@@ -207,6 +306,7 @@ def audit_samples(
         seed=audit_seed,
         distribution=distribution,
         distribution_params=distribution_params,
+        sampling_image=sampling_image,
     )
 
 
@@ -245,6 +345,7 @@ def summarize_dataset(records: list[dict]) -> dict:
 
 
 def write_probe_csv(save_path: Path, samples: np.ndarray) -> None:
+    save_path.parent.mkdir(parents=True, exist_ok=True)
     np.savetxt(
         save_path,
         samples.astype(np.int64, copy=False),
@@ -253,6 +354,35 @@ def write_probe_csv(save_path: Path, samples: np.ndarray) -> None:
         header="row,col,was_embedded",
         comments="",
     )
+
+
+def write_probe_summary_csv(save_path: Path, summaries: list[dict]) -> None:
+    save_path.parent.mkdir(parents=True, exist_ok=True)
+    fieldnames = [
+        "record_name",
+        "record_path",
+        "cover_relative_path",
+        "stego_relative_path",
+        "method",
+        "alpha",
+        "record_seed",
+        "probe_seed",
+        "distribution",
+        "image_source",
+        "probed_pixels",
+        "guessed_pixels",
+        "guessed_fraction",
+        "guessed_percentage",
+        "used_pixels",
+        "used_pixel_fraction",
+        "used_pixel_percentage",
+        "recall_at_budget",
+    ]
+    with save_path.open("w", encoding="utf-8", newline="") as handle:
+        writer = csv.DictWriter(handle, fieldnames=fieldnames)
+        writer.writeheader()
+        for summary in summaries:
+            writer.writerow(summary)
 
 
 def default_probe_path(record: dict) -> Path:
@@ -266,18 +396,54 @@ def summarize_probe(
     samples: np.ndarray,
     used_seed: int,
     distribution: str,
+    image_source: str | None = None,
 ) -> dict:
     probed_pixels = int(samples.shape[0])
     guessed_count = int(samples[:, 2].sum()) if probed_pixels else 0
-    return {
+    used_pixels = int(record["used_pixels"])
+    summary = {
+        "record_name": record["record_path"].name,
         "record_path": str(record["record_path"]),
+        "cover_relative_path": record["cover_relative_path"],
+        "stego_relative_path": record["stego_relative_path"],
+        "method": record["method"],
+        "alpha": record["alpha"],
+        "record_seed": int(record["seed"]),
         "used_seed": int(used_seed),
         "distribution": distribution,
         "probed_pixels": probed_pixels,
         "guessed_pixels": guessed_count,
         "guessed_fraction": guessed_count / probed_pixels if probed_pixels else 0.0,
         "guessed_percentage": 100.0 * guessed_count / probed_pixels if probed_pixels else 0.0,
+        "used_pixels": used_pixels,
+        "used_pixel_fraction": record["used_pixel_fraction"],
+        "used_pixel_percentage": record["used_pixel_percentage"],
+        "recall_at_budget": guessed_count / used_pixels if used_pixels else 0.0,
     }
+    if image_source is not None:
+        summary["image_source"] = image_source
+    else:
+        summary["image_source"] = ""
+    summary["probe_seed"] = summary.pop("used_seed")
+    return summary
+
+
+def resolve_probe_image_path(
+    record: dict,
+    input_base: str | Path,
+    image_source: str,
+    cover_root: str | Path | None = None,
+) -> Path:
+    input_base = Path(input_base).expanduser().resolve()
+    if image_source == "stego":
+        return (input_base / record["stego_relative_path"]).resolve()
+    if image_source == "cover":
+        if cover_root is None:
+            raise ValueError("cover_root must be provided when probe_image_source='cover'.")
+        return (Path(cover_root).expanduser().resolve() / record["cover_relative_path"]).resolve()
+    raise ValueError(
+        f"Unsupported probe image source '{image_source}'. Supported: {sorted(SUPPORTED_PROBE_IMAGE_SOURCES)}"
+    )
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -306,6 +472,26 @@ def build_parser() -> argparse.ArgumentParser:
         "--save-samples",
         help="Optional path for a merged CSV when probing multiple records, or an explicit CSV path for one record.",
     )
+    parser.add_argument(
+        "--save-summary",
+        help="Optional CSV path for per-record probing results.",
+    )
+    parser.add_argument(
+        "--probe-distribution",
+        default="uniform",
+        choices=sorted(SUPPORTED_PROBE_DISTRIBUTIONS),
+        help="Sampling distribution used for probing.",
+    )
+    parser.add_argument(
+        "--probe-image-source",
+        default="stego",
+        choices=sorted(SUPPORTED_PROBE_IMAGE_SOURCES),
+        help="Image source used by image-adaptive probing distributions such as texture_energy.",
+    )
+    parser.add_argument(
+        "--cover-root",
+        help="Root directory for original cover images when probe-image-source is 'cover'.",
+    )
     return parser
 
 
@@ -314,7 +500,11 @@ def run_probe_cli(args: argparse.Namespace) -> None:
         input_path=args.input_path,
         sample_count=args.sample_count,
         sample_seed=args.sample_seed,
+        probe_distribution=args.probe_distribution,
         save_samples=args.save_samples,
+        save_summary=args.save_summary,
+        probe_image_source=args.probe_image_source,
+        cover_root=args.cover_root,
         cover_image=args.cover_image,
         stego_image=args.stego_image,
     )
@@ -327,6 +517,9 @@ def run_probe(
     probe_distribution: str = "uniform",
     probe_distribution_params: dict | None = None,
     save_samples: str | Path | None = None,
+    save_summary: str | Path | None = None,
+    probe_image_source: str = "stego",
+    cover_root: str | Path | None = None,
     cover_image: str | Path | None = None,
     stego_image: str | Path | None = None,
 ) -> None:
@@ -334,7 +527,13 @@ def run_probe(
         raise ValueError(
             f"Unsupported probe distribution '{probe_distribution}'. Supported: {sorted(SUPPORTED_PROBE_DISTRIBUTIONS)}"
         )
+    if probe_image_source not in SUPPORTED_PROBE_IMAGE_SOURCES:
+        raise ValueError(
+            f"Unsupported probe image source '{probe_image_source}'. Supported: {sorted(SUPPORTED_PROBE_IMAGE_SOURCES)}"
+        )
 
+    input_path = Path(input_path).expanduser().resolve()
+    input_base = input_path if input_path.is_dir() else input_path.parent
     record_paths = iter_record_paths(input_path)
     records = [load_change_record(record_path) for record_path in record_paths]
 
@@ -351,23 +550,37 @@ def run_probe(
         print(json.dumps(comparison, indent=2))
 
     all_samples: list[tuple[str, int, int, int]] = []
+    all_summaries: list[dict] = []
     for record in records:
         used_seed = resolve_probe_seed(record, sample_seed)
+        sampling_image = None
+        if probe_distribution == "texture_energy":
+            sampling_image_path = resolve_probe_image_path(
+                record=record,
+                input_base=input_base,
+                image_source=probe_image_source,
+                cover_root=cover_root,
+            )
+            sampling_image = to_u8_array(sampling_image_path)
         samples = audit_samples(
             record,
             sample_count=sample_count,
             seed=used_seed,
             distribution=probe_distribution,
             distribution_params=probe_distribution_params,
+            sampling_image=sampling_image,
         )
+        summary = summarize_probe(
+            record,
+            samples=samples,
+            used_seed=used_seed,
+            distribution=probe_distribution,
+            image_source=probe_image_source if probe_distribution == "texture_energy" else None,
+        )
+        all_summaries.append(summary)
         print(
             json.dumps(
-                summarize_probe(
-                    record,
-                    samples=samples,
-                    used_seed=used_seed,
-                    distribution=probe_distribution,
-                ),
+                summary,
                 indent=2,
             )
         )
@@ -381,6 +594,10 @@ def run_probe(
                         int(label),
                     )
                 )
+
+    if save_summary:
+        save_path = Path(save_summary).expanduser().resolve()
+        write_probe_summary_csv(save_path, all_summaries)
 
     if save_samples:
         save_path = Path(save_samples).expanduser().resolve()

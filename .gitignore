@@ -1,0 +1,13 @@
+.DS_Store
+__pycache__/
+*.py[cod]
+
+.idea/
+
+ALASKA_v2_TIFF_512_GrayScale_10K/
+ALASKA_v2_TIFF_512_GrayScale_50/
+
+output/
+out/
+experiments/
+paper_outputs/

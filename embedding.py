@@ -1,6 +1,8 @@
 import argparse
 import hashlib
 import json
+import os
+import sys
 from pathlib import Path
 from typing import Iterable
 
@@ -10,6 +12,41 @@ from PIL import Image
 
 IMAGE_EXTENSIONS = {".png", ".jpg", ".jpeg", ".tif", ".tiff", ".bmp"}
 SUPPORTED_METHODS = {"HUGO", "MIPOD"}
+
+# Edit these defaults and then run: python3 embedding.py
+DEFAULT_SRC_DIR = Path("ALASKA_v2_TIFF_512_GrayScale_50")
+DEFAULT_DST_DIR = Path("output")
+DEFAULT_METHOD = "HUGO"
+DEFAULT_ALPHA = 0.3
+DEFAULT_SEED = 12345
+
+# HUGO in the installed conseal package requests Numba cache=True, which fails in
+# this environment. Keep JIT enabled, but disable Numba's on-disk cache at import.
+CONSEAL_DISABLE_NUMBA_JIT = False
+CONSEAL_DISABLE_NUMBA_CACHE = True
+
+
+def prepare_conseal_import() -> None:
+    if CONSEAL_DISABLE_NUMBA_JIT:
+        os.environ.setdefault("NUMBA_DISABLE_JIT", "1")
+        return
+
+    if not CONSEAL_DISABLE_NUMBA_CACHE:
+        return
+
+    import numba
+
+    if getattr(numba, "_conseal_cache_disabled", False):
+        return
+
+    original_jit = numba.jit
+
+    def jit_without_cache(*args, **kwargs):
+        kwargs["cache"] = False
+        return original_jit(*args, **kwargs)
+
+    numba.jit = jit_without_cache
+    numba._conseal_cache_disabled = True
 
 
 def to_u8_array(image_path: Path) -> np.ndarray:
@@ -42,6 +79,7 @@ def simulate_embedding(
     alpha: float,
     seed: int,
 ) -> np.ndarray:
+    prepare_conseal_import()
     import conseal as cl
 
     normalized_method = method.upper()
@@ -194,13 +232,29 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--seed", type=int, default=12345)
     return parser
 
-if __name__ == "__main__":
-    args = build_parser().parse_args()
-    manifest = embed_and_log(
-        src_dir=args.src_dir,
-        dst_dir=args.dst_dir,
-        method=args.method,
-        alpha=args.alpha,
-        seed=args.seed,
+
+def run_with_defaults() -> list[dict]:
+    return embed_and_log(
+        src_dir=DEFAULT_SRC_DIR,
+        dst_dir=DEFAULT_DST_DIR,
+        method=DEFAULT_METHOD,
+        alpha=DEFAULT_ALPHA,
+        seed=DEFAULT_SEED,
     )
-    print(f"Processed {len(manifest)} images into {Path(args.dst_dir).expanduser().resolve()}")
+
+if __name__ == "__main__":
+    if len(sys.argv) == 1:
+        manifest = run_with_defaults()
+        target_dir = DEFAULT_DST_DIR
+    else:
+        args = build_parser().parse_args()
+        manifest = embed_and_log(
+            src_dir=args.src_dir,
+            dst_dir=args.dst_dir,
+            method=args.method,
+            alpha=args.alpha,
+            seed=args.seed,
+        )
+        target_dir = args.dst_dir
+
+    print(f"Processed {len(manifest)} images into {Path(target_dir).expanduser().resolve()}")
