@@ -13,8 +13,10 @@ SUPPORTED_PROBE_DISTRIBUTIONS = {
     "center_gaussian",
     "center_laplace",
     "edge_gaussian",
+    "laplacian_residual",
     "texture_energy",
 }
+IMAGE_ADAPTIVE_PROBE_DISTRIBUTIONS = {"texture_energy", "laplacian_residual"}
 SUPPORTED_PROBE_IMAGE_SOURCES = {"cover", "stego"}
 
 
@@ -156,6 +158,32 @@ def build_texture_energy_probabilities(
     return flat_weights / weight_sum
 
 
+def build_laplacian_residual_probabilities(
+    sampling_image: np.ndarray,
+    distribution_params: dict | None = None,
+) -> np.ndarray:
+    params = distribution_params or {}
+    gamma = _resolve_positive_scale(params, "gamma", 1.0)
+    floor = _resolve_nonnegative_value(params, "floor", 1e-6)
+
+    image = sampling_image.astype(np.float32, copy=False)
+    laplacian = np.zeros_like(image, dtype=np.float32)
+    laplacian[1:-1, 1:-1] = np.abs(
+        4.0 * image[1:-1, 1:-1]
+        - image[:-2, 1:-1]
+        - image[2:, 1:-1]
+        - image[1:-1, :-2]
+        - image[1:-1, 2:]
+    )
+
+    weights = (laplacian + floor) ** gamma
+    flat_weights = weights.reshape(-1).astype(np.float64, copy=False)
+    weight_sum = float(flat_weights.sum())
+    if weight_sum <= 0:
+        raise ValueError("Laplacian-residual probing produced non-positive total weight.")
+    return flat_weights / weight_sum
+
+
 def build_sampling_probabilities(
     image_shape: tuple[int, int],
     distribution: str,
@@ -181,6 +209,19 @@ def build_sampling_probabilities(
                 f"{sampling_image.shape} vs {image_shape}"
             )
         return build_texture_energy_probabilities(
+            sampling_image=sampling_image,
+            distribution_params=params,
+        )
+
+    if distribution == "laplacian_residual":
+        if sampling_image is None:
+            raise ValueError("Laplacian-residual probing requires a sampling image.")
+        if tuple(sampling_image.shape) != tuple(image_shape):
+            raise ValueError(
+                "Sampling image shape does not match the recorded image shape: "
+                f"{sampling_image.shape} vs {image_shape}"
+            )
+        return build_laplacian_residual_probabilities(
             sampling_image=sampling_image,
             distribution_params=params,
         )
@@ -486,7 +527,7 @@ def build_parser() -> argparse.ArgumentParser:
         "--probe-image-source",
         default="stego",
         choices=sorted(SUPPORTED_PROBE_IMAGE_SOURCES),
-        help="Image source used by image-adaptive probing distributions such as texture_energy.",
+        help="Image source used by image-adaptive probing distributions.",
     )
     parser.add_argument(
         "--cover-root",
@@ -554,7 +595,7 @@ def run_probe(
     for record in records:
         used_seed = resolve_probe_seed(record, sample_seed)
         sampling_image = None
-        if probe_distribution == "texture_energy":
+        if probe_distribution in IMAGE_ADAPTIVE_PROBE_DISTRIBUTIONS:
             sampling_image_path = resolve_probe_image_path(
                 record=record,
                 input_base=input_base,
@@ -575,7 +616,11 @@ def run_probe(
             samples=samples,
             used_seed=used_seed,
             distribution=probe_distribution,
-            image_source=probe_image_source if probe_distribution == "texture_energy" else None,
+            image_source=(
+                probe_image_source
+                if probe_distribution in IMAGE_ADAPTIVE_PROBE_DISTRIBUTIONS
+                else None
+            ),
         )
         all_summaries.append(summary)
         print(
