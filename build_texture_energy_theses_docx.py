@@ -3,6 +3,7 @@ from __future__ import annotations
 import csv
 import copy
 import math
+import os
 import re
 import zipfile
 from pathlib import Path
@@ -12,7 +13,11 @@ import xml.etree.ElementTree as ET
 from PIL import Image, ImageDraw, ImageFont
 
 
-SOURCE_DOCX = Path("/Users/pavloyatsura/Downloads/texture_energy_probing_conference_theses_en_revised_d_progonov.docx")
+# Paper-production tooling: edits a reviewer's DOCX. Point THESES_SOURCE_DOCX at your local copy
+# (defaults to a file of this name in the current directory) -- no machine-specific path is committed.
+SOURCE_DOCX = Path(
+    os.environ.get("THESES_SOURCE_DOCX", "texture_energy_probing_conference_theses_en_revised_d_progonov.docx")
+)
 SUMMARY_CSV = Path("experiments/probing_only/probe_summary.csv")
 OUTPUT_DOCX = Path("texture_energy_probing_conference_theses_en_revised_green.docx")
 ASSET_DIR = Path("generated_thesis_assets")
@@ -831,6 +836,11 @@ def build_content_types_xml(original_content_types_xml: bytes) -> bytes:
 
 
 def main() -> None:
+    if not SOURCE_DOCX.exists():
+        raise FileNotFoundError(
+            f"Source DOCX not found: {SOURCE_DOCX}. Set THESES_SOURCE_DOCX to your local copy "
+            "(this is paper-production tooling and needs the reviewer's .docx)."
+        )
     lookup = read_summary(SUMMARY_CSV)
     build_chart_images(lookup)
     original_xml = zipfile.ZipFile(SOURCE_DOCX).read("word/document.xml")

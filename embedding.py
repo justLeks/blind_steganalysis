@@ -20,13 +20,29 @@ DEFAULT_METHOD = "HUGO"
 DEFAULT_ALPHA = 0.3
 DEFAULT_SEED = 12345
 
-# HUGO in the installed conseal package requests Numba cache=True, which fails in
-# this environment. Keep JIT enabled, but disable Numba's on-disk cache at import.
-CONSEAL_DISABLE_NUMBA_JIT = False
-CONSEAL_DISABLE_NUMBA_CACHE = True
+# conseal's HUGO/MiPOD Numba kernels request cache=True, which fails in sandboxed or read-only
+# environments (no writable __pycache__). We keep JIT enabled but disable Numba's on-disk cache by
+# wrapping numba.jit at import time. Override via environment variables:
+#   NUMBA_DISABLE_JIT=1             disable JIT entirely (slow; Numba's own switch)
+#   CONSEAL_DISABLE_NUMBA_CACHE=0   keep Numba's on-disk cache (default: 1 = disable)
+def _env_flag(name: str, default: bool) -> bool:
+    raw = os.environ.get(name)
+    if raw is None:
+        return default
+    return raw.strip().lower() not in {"0", "false", "no", ""}
+
+
+CONSEAL_DISABLE_NUMBA_JIT = _env_flag("NUMBA_DISABLE_JIT", False)
+CONSEAL_DISABLE_NUMBA_CACHE = _env_flag("CONSEAL_DISABLE_NUMBA_CACHE", True)
 
 
 def prepare_conseal_import() -> None:
+    """Make ``import conseal`` safe where Numba's on-disk cache is unavailable.
+
+    conseal decorates its JIT kernels with ``cache=True``; in sandboxed/read-only environments that
+    raises at import. This wraps ``numba.jit`` to force ``cache=False`` (idempotent). Behaviour is
+    controlled by the ``NUMBA_DISABLE_JIT`` / ``CONSEAL_DISABLE_NUMBA_CACHE`` env flags above.
+    """
     if CONSEAL_DISABLE_NUMBA_JIT:
         os.environ.setdefault("NUMBA_DISABLE_JIT", "1")
         return
@@ -46,7 +62,7 @@ def prepare_conseal_import() -> None:
         return original_jit(*args, **kwargs)
 
     numba.jit = jit_without_cache
-    numba._conseal_cache_disabled = True
+    numba._conseal_cache_disabled = True  # type: ignore[attr-defined]  # sentinel making this idempotent
 
 
 def to_u8_array(image_path: Path) -> np.ndarray:

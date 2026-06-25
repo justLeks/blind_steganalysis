@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import argparse
 import csv
 import hashlib
 import json
@@ -11,6 +12,7 @@ import numpy as np
 from embedding import embed_and_log, to_u8_array
 from read_changes import (
     IMAGE_ADAPTIVE_PROBE_DISTRIBUTIONS,
+    SUPPORTED_PROBE_DISTRIBUTIONS,
     build_sampling_probabilities,
     iter_record_paths,
     load_change_record,
@@ -18,9 +20,12 @@ from read_changes import (
 )
 
 
-# Edit these settings and run: python3 run_probing_experiment.py
+# These module-level constants are the DEFAULTS. Override any of them on the command line
+# (see build_parser); the reporting scripts import these names, so they remain the source of truth
+# for the default result location. Committed defaults reproduce the published experiment in
+# experiments/probing_only (texture_energy, fixed seed 12345).
 COVER_ROOT = Path("ALASKA_v2_TIFF_512_GrayScale_50")
-EXPERIMENT_ROOT = Path("experiments/probing_laplacian")
+EXPERIMENT_ROOT = Path("experiments/probing_only")
 STEGANOGRAM_ROOT = Path("experiments/probing_only/steganograms")
 
 METHODS = ["HUGO", "MIPOD"]
@@ -28,12 +33,15 @@ ALPHAS = [0.03, 0.05, 0.1, 0.2, 0.3, 0.4, 0.5]
 EMBED_SEED = 12345
 
 PROBE_BUDGET_FRACTIONS = [0.01, 0.05, 0.10, 0.20, 0.30, 0.40, 0.50]
-PROBE_DISTRIBUTION = "laplacian_residual"
+PROBE_DISTRIBUTION = "texture_energy"
 PROBE_DISTRIBUTION_PARAMS = {"gamma": 1.0, "floor": 1e-6}
 PROBE_IMAGE_SOURCE = "stego"
-# None means a fresh random seed is generated for each experiment run and saved
-# to metadata.json. Set this to an integer to reproduce a previous run.
-PROBE_SEED: int | None = None
+# Fixed for reproducibility (matches experiments/probing_only). Pass --probe-seed -1 (or set this to
+# None) for a fresh random seed each run, saved to metadata.json.
+PROBE_SEED: int | None = 12345
+
+# Max records processed per config (0 = all). Set via --limit.
+LIMIT = 0
 
 RAW_CSV = EXPERIMENT_ROOT / "probe_raw.csv"
 SUMMARY_CSV = EXPERIMENT_ROOT / "probe_summary.csv"
@@ -273,6 +281,8 @@ def run_experiment(run_probe_seed: int) -> tuple[list[dict], list[dict]]:
         for alpha in ALPHAS:
             config_dir = ensure_steganograms(method, alpha, expected_count)
             record_paths = iter_record_paths(config_dir)
+            if LIMIT:
+                record_paths = record_paths[:LIMIT]
             for record_path in record_paths:
                 record = load_change_record(record_path)
                 total_pixels = record["image_shape"][0] * record["image_shape"][1]
@@ -283,7 +293,48 @@ def run_experiment(run_probe_seed: int) -> tuple[list[dict], list[dict]]:
     return raw_rows, summary_rows
 
 
-def main() -> None:
+def build_parser() -> argparse.ArgumentParser:
+    p = argparse.ArgumentParser(
+        description="Budgeted carrier-pixel probing sweep. Defaults reproduce experiments/probing_only."
+    )
+    p.add_argument("--cover-root", type=Path, default=COVER_ROOT)
+    p.add_argument("--experiment-root", type=Path, default=EXPERIMENT_ROOT)
+    p.add_argument("--steganogram-root", type=Path, default=STEGANOGRAM_ROOT)
+    p.add_argument("--methods", nargs="+", default=METHODS)
+    p.add_argument("--alphas", nargs="+", type=float, default=ALPHAS)
+    p.add_argument("--budgets", nargs="+", type=float, default=PROBE_BUDGET_FRACTIONS)
+    p.add_argument("--distribution", default=PROBE_DISTRIBUTION, choices=sorted(SUPPORTED_PROBE_DISTRIBUTIONS))
+    p.add_argument("--image-source", default=PROBE_IMAGE_SOURCE, choices=["stego", "cover"])
+    p.add_argument(
+        "--probe-seed", type=int, default=PROBE_SEED,
+        help="Fixed probe seed (default 12345). Pass -1 for a fresh random seed each run.",
+    )
+    p.add_argument("--limit", type=int, default=LIMIT, help="Max records per config (0 = all).")
+    return p
+
+
+def apply_args(args: argparse.Namespace) -> None:
+    """Override the module-level config from parsed CLI args (keeps the importable defaults intact)."""
+    global COVER_ROOT, EXPERIMENT_ROOT, STEGANOGRAM_ROOT, METHODS, ALPHAS
+    global PROBE_BUDGET_FRACTIONS, PROBE_DISTRIBUTION, PROBE_IMAGE_SOURCE, PROBE_SEED, LIMIT
+    global RAW_CSV, SUMMARY_CSV, METADATA_JSON
+    COVER_ROOT = args.cover_root
+    EXPERIMENT_ROOT = args.experiment_root
+    STEGANOGRAM_ROOT = args.steganogram_root
+    METHODS = args.methods
+    ALPHAS = args.alphas
+    PROBE_BUDGET_FRACTIONS = args.budgets
+    PROBE_DISTRIBUTION = args.distribution
+    PROBE_IMAGE_SOURCE = args.image_source
+    PROBE_SEED = None if (args.probe_seed is not None and args.probe_seed < 0) else args.probe_seed
+    LIMIT = args.limit
+    RAW_CSV = EXPERIMENT_ROOT / "probe_raw.csv"
+    SUMMARY_CSV = EXPERIMENT_ROOT / "probe_summary.csv"
+    METADATA_JSON = EXPERIMENT_ROOT / "metadata.json"
+
+
+def main(argv: list[str] | None = None) -> None:
+    apply_args(build_parser().parse_args(argv))
     run_probe_seed, probe_seed_mode = resolve_run_probe_seed()
     print(f"[probe_seed] {run_probe_seed} ({probe_seed_mode})")
 
