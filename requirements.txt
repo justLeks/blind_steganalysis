@@ -1,20 +1,12 @@
-# Blind steganalysis — pinned dependencies (verified on Python 3.11, 2026-06).
+# Blind steganalysis — pinned dependencies (verified on Python 3.11, 2026-07).
 # Install:  python3 -m pip install -r requirements.txt
 
-# ── Core pipeline: embedding, probing, localization benchmark ────────────────
 numpy==2.4.2
 pillow==12.1.1
 conseal==2025.11        # HUGO/MiPOD simulators + selection-channel probabilities
 numba==0.64.0           # imported by embedding.py (JIT cache workaround); also a conseal dependency
-scipy==1.17.1           # pulled in transitively by conseal
+scipy==1.17.1           # ndimage convolutions for the score-map registry; also a conseal dependency
+matplotlib==3.10.6      # grayscale comparison figures (make_comparison_figures.py)
 
-# ── Tests ────────────────────────────────────────────────────────────────────
-# Property tests run on the stdlib `unittest` runner — no extra dependency needed:
+# Tests run on the stdlib `unittest` runner — no extra dependency needed:
 #   python3 -m unittest discover -s tests -v
-# pytest also works if preferred:  python3 -m pip install pytest
-
-# ── Reporting / paper production (optional) ──────────────────────────────────
-# Needed only by the Excel/DOCX/figure generators, NOT by the research pipeline.
-# Uncomment if you run build_*_docx.py / render_formula_images.py:
-# python-docx
-# lxml

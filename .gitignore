@@ -4,10 +4,14 @@ __pycache__/
 
 .idea/
 
+# Cover datasets (large, external)
 ALASKA_v2_TIFF_512_GrayScale_10K/
 ALASKA_v2_TIFF_512_GrayScale_50/
 
+# Ad-hoc embedding output dirs
 output/
 out/
-experiments/
-paper_outputs/
+
+# Bulky deterministic artifacts (re-derivable via embedding.py, seed 12345).
+# CSV/PNG/JSON results under experiments/ ARE tracked.
+experiments/**/steganograms/

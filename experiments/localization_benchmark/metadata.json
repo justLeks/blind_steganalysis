@@ -1,0 +1,38 @@
+{
+  "steganogram_root": "/Users/pavloyatsura/Documents/phd/blind_steganalysis/experiments/probing_only/steganograms",
+  "cover_root": "/Users/pavloyatsura/Documents/phd/blind_steganalysis/ALASKA_v2_TIFF_512_GrayScale_50",
+  "methods": [
+    "HUGO",
+    "MIPOD"
+  ],
+  "alphas": [
+    0.03,
+    0.05,
+    0.1,
+    0.2,
+    0.3,
+    0.4,
+    0.5
+  ],
+  "budgets": [
+    0.01,
+    0.05,
+    0.1,
+    0.2,
+    0.3,
+    0.4,
+    0.5
+  ],
+  "localizers": [
+    "uniform",
+    "texture_stego",
+    "texture_cover",
+    "oracle"
+  ],
+  "images_per_config": "all",
+  "bootstrap_resamples": 2000,
+  "seed": 12345,
+  "n_raw_rows": 5600,
+  "n_summary_rows": 56,
+  "note": "uniform localizer reported as analytic expectation (AP=prevalence, recall=fraction)."
+}
