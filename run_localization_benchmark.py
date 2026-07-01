@@ -1,20 +1,30 @@
-"""Milestone 1 benchmark: bracket the texture-energy localizer between floor and ceiling.
+"""Distribution benchmark: bracket every probing score map between floor and ceiling.
 
 Localizers compared, per (method, alpha), over the recorded carrier masks:
 
-- ``uniform``        -- random floor. AP = prevalence, recall@B = B/N, lift = 1 (analytic expectation).
-- ``texture_stego``  -- the current method: texture energy of the STEGO image.
-- ``texture_cover``  -- cover-vs-stego ablation: texture energy of the COVER image.
-- ``oracle``         -- ceiling: true conseal selection channel (cover-derived change probability).
+- ``uniform``            -- random floor. AP = prevalence, recall@B = B/N, lift = 1 (analytic).
+- ``<dist>_<stego|cover>`` -- one localizer per score map in ``read_changes.SCORE_MAP_BUILDERS``
+  (texture_energy, laplacian_residual, local_variance, wavelet_energy, srm_residual), scored on the
+  stego image (the blind setting) and on the cover image (the cover-vs-stego ablation: if the two
+  match, the map carries no embedding-specific signal).
+- ``oracle``             -- ceiling: true conseal selection channel (cover-derived change probability).
+
+Legacy names ``texture_stego`` / ``texture_cover`` are accepted as aliases and normalised to
+``texture_energy_stego`` / ``texture_energy_cover``.
 
 Metrics per image: Average Precision (primary), ROC-AUC (secondary), and deterministic top-B
 recall/lift at each budget fraction. Aggregated per (method, alpha, localizer) with percentile
 bootstrap CIs across images.
 
+Reproducibility caveat: one tie-break RNG is shared sequentially across all rows, so per-image
+recall/lift columns only reproduce exactly under an identical (localizers, limit) configuration.
+AP and ROC-AUC are RNG-free and always reproducible. The Milestone-1 run of record lives frozen in
+``experiments/localization_benchmark/``; this script now writes to ``experiments/distribution_benchmark``.
+
 Reuses already-embedded steganograms (no re-embedding). Config is taken from CLI args and persisted to
 ``metadata.json`` next to the outputs -- the reproducible pattern that replaces config-as-globals.
 
-Run:  python3 run_localization_benchmark.py            # full sweep, all images
+Run:  python3 run_localization_benchmark.py            # full sweep, all images (~1 h: oracle dominates)
       python3 run_localization_benchmark.py --limit 20 # quick pass
 """
 
@@ -29,9 +39,11 @@ import numpy as np
 
 from embedding import to_u8_array
 from read_changes import (
-    build_texture_energy_probabilities,
+    IMAGE_ADAPTIVE_PROBE_DISTRIBUTIONS,
+    build_adaptive_probabilities,
     iter_record_paths,
     load_change_record,
+    resolve_score_map_params,
 )
 from run_probing_experiment import config_id
 from selection_channel import oracle_scores
@@ -41,27 +53,69 @@ import localization_metrics as M
 DEFAULTS = dict(
     steganogram_root=Path("experiments/probing_only/steganograms"),
     cover_root=Path("ALASKA_v2_TIFF_512_GrayScale_50"),
-    output_root=Path("experiments/localization_benchmark"),
+    output_root=Path("experiments/distribution_benchmark"),
     methods=["HUGO", "MIPOD"],
     alphas=[0.03, 0.05, 0.1, 0.2, 0.3, 0.4, 0.5],
     budgets=[0.01, 0.05, 0.10, 0.20, 0.30, 0.40, 0.50],
-    localizers=["uniform", "texture_stego", "texture_cover", "oracle"],
+    localizers=[
+        "uniform",
+        "texture_energy_stego",
+        "texture_energy_cover",
+        "laplacian_residual_stego",
+        "laplacian_residual_cover",
+        "local_variance_stego",
+        "local_variance_cover",
+        "wavelet_energy_stego",
+        "wavelet_energy_cover",
+        "srm_residual_stego",
+        "srm_residual_cover",
+        "oracle",
+    ],
 )
-TEXTURE_PARAMS = {"gamma": 1.0, "floor": 1e-6}
+# Overrides on top of the registry defaults; resolve_score_map_params fills the rest.
+SCORE_PARAMS: dict[str, dict] = {"local_variance": {"window": 9}}
+LOCALIZER_ALIASES = {
+    "texture_stego": "texture_energy_stego",
+    "texture_cover": "texture_energy_cover",
+}
+
+
+def parse_localizer(name: str) -> tuple[str, str]:
+    """Split ``<dist>_<stego|cover>`` into (distribution, source); reject anything else.
+
+    ``uniform`` and ``oracle`` are not parseable map localizers and raise, as does any
+    unknown distribution or source -- callers validate the full list up front with this.
+    """
+    dist, sep, source = name.rpartition("_")
+    if sep and source in ("stego", "cover") and dist in IMAGE_ADAPTIVE_PROBE_DISTRIBUTIONS:
+        return dist, source
+    raise ValueError(
+        f"Unknown localizer '{name}'. Expected 'uniform', 'oracle', or '<distribution>_<stego|cover>' "
+        f"with distribution in {sorted(IMAGE_ADAPTIVE_PROBE_DISTRIBUTIONS)}."
+    )
 
 
 def per_image_scores(localizer, cover, stego, method, alpha):
-    """Per-pixel score vector for a localizer. ``uniform`` is handled analytically by the caller."""
-    if localizer == "texture_stego":
-        return build_texture_energy_probabilities(stego, TEXTURE_PARAMS).reshape(-1)
-    if localizer == "texture_cover":
-        return build_texture_energy_probabilities(cover, TEXTURE_PARAMS).reshape(-1)
+    """Per-pixel score vector for a localizer. ``uniform`` is handled analytically by the caller.
+
+    Adaptive localizers score by the sampling-probability map (the monotone
+    (energy + floor)**gamma normalisation) -- the same code path the probing runners use, which
+    keeps the texture_energy rows bit-identical to the Milestone-1 run. AP/recall only depend on
+    the score ordering, so this is equivalent to ranking by the raw energy map.
+    """
     if localizer == "oracle":
         return oracle_scores(cover, method, alpha)
-    raise ValueError(localizer)
+    dist, source = parse_localizer(localizer)
+    image = stego if source == "stego" else cover
+    return build_adaptive_probabilities(dist, image, SCORE_PARAMS.get(dist))
 
 
 def evaluate(args) -> None:
+    args.localizers = [str(LOCALIZER_ALIASES.get(name, name)) for name in args.localizers]
+    for name in args.localizers:
+        if name not in ("uniform", "oracle"):
+            parse_localizer(name)  # fail fast on typos before the long sweep
+
     budgets = np.asarray(args.budgets, dtype=np.float64)
     budget_pct = [f"{int(round(100 * b))}" for b in args.budgets]
     rng = np.random.default_rng(args.seed)
@@ -133,6 +187,16 @@ def evaluate(args) -> None:
                 "alphas": args.alphas,
                 "budgets": args.budgets,
                 "localizers": args.localizers,
+                "score_map_params": {
+                    dist: resolve_score_map_params(dist, SCORE_PARAMS.get(dist))
+                    for dist in sorted(
+                        {
+                            parse_localizer(name)[0]
+                            for name in args.localizers
+                            if name not in ("uniform", "oracle")
+                        }
+                    )
+                },
                 "images_per_config": args.limit or "all",
                 "bootstrap_resamples": args.bootstrap,
                 "seed": args.seed,

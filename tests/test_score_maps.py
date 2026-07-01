@@ -239,6 +239,20 @@ class TestScoreMapProperties(unittest.TestCase):
             )
 
 
+class TestParseLocalizer(unittest.TestCase):
+    def test_parse_localizer(self):
+        from run_localization_benchmark import LOCALIZER_ALIASES, parse_localizer
+
+        self.assertEqual(parse_localizer("texture_energy_stego"), ("texture_energy", "stego"))
+        self.assertEqual(parse_localizer("local_variance_cover"), ("local_variance", "cover"))
+        self.assertEqual(parse_localizer("srm_residual_stego"), ("srm_residual", "stego"))
+        self.assertEqual(LOCALIZER_ALIASES["texture_stego"], "texture_energy_stego")
+        self.assertEqual(LOCALIZER_ALIASES["texture_cover"], "texture_energy_cover")
+        for bad in ("uniform", "oracle", "sobel_stego", "texture_energy_banana", "texture_energy", ""):
+            with self.assertRaises(ValueError, msg=bad):
+                parse_localizer(bad)
+
+
 class TestWaveletFilters(unittest.TestCase):
     def test_highpass_kills_dc(self):
         self.assertAlmostEqual(float(DB8_HPDF.sum()), 0.0, places=9)
