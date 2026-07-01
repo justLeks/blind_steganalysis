@@ -1,22 +1,17 @@
 import argparse
 import csv
 import json
+from collections.abc import Callable
 from pathlib import Path
 
 import numpy as np
+from scipy import ndimage
 
 from embedding import to_u8_array
 
 
-SUPPORTED_PROBE_DISTRIBUTIONS = {
-    "uniform",
-    "center_gaussian",
-    "center_laplace",
-    "edge_gaussian",
-    "laplacian_residual",
-    "texture_energy",
-}
-IMAGE_ADAPTIVE_PROBE_DISTRIBUTIONS = {"texture_energy", "laplacian_residual"}
+# SUPPORTED_PROBE_DISTRIBUTIONS and IMAGE_ADAPTIVE_PROBE_DISTRIBUTIONS are defined
+# below, next to the score-map registry they are derived from.
 SUPPORTED_PROBE_IMAGE_SOURCES = {"cover", "stego"}
 
 
@@ -125,15 +120,28 @@ def _resolve_nonnegative_value(
     return value
 
 
-def build_texture_energy_probabilities(
-    sampling_image: np.ndarray,
-    distribution_params: dict | None = None,
-) -> np.ndarray:
-    params = distribution_params or {}
-    gamma = _resolve_positive_scale(params, "gamma", 1.0)
-    floor = _resolve_nonnegative_value(params, "floor", 1e-6)
+# ---------------------------------------------------------------------------
+# Score-map registry.
+#
+# One raw energy-map builder per image-adaptive distribution. The raw map is the
+# per-pixel ranking score used by run_localization_benchmark.py; the sampling
+# probabilities used by the probing runners are the shared monotone transform
+# (energy + floor) ** gamma, normalised to sum 1 (build_adaptive_probabilities),
+# so both views of a distribution come from the same implementation.
+#
+# Builder contract: (image, resolved_params) -> 2-D non-negative energy map.
+# Builders must tolerate the shared gamma/floor keys and read only their own
+# extras (resolve_score_map_params supplies defaults).
+# ---------------------------------------------------------------------------
 
-    image = sampling_image.astype(np.float32, copy=False)
+
+def _texture_energy_map(image: np.ndarray, params: dict) -> np.ndarray:
+    """|dx| + |dy| + |4-neighbour Laplacian|; float32, zero borders.
+
+    Verbatim energy computation of the published texture-energy probing run
+    (experiments/probing_only) -- kept bit-exact, do not modernise.
+    """
+    image = image.astype(np.float32, copy=False)
 
     gradient_x = np.zeros_like(image, dtype=np.float32)
     gradient_y = np.zeros_like(image, dtype=np.float32)
@@ -149,24 +157,12 @@ def build_texture_energy_probabilities(
         - image[1:-1, 2:]
     )
 
-    energy = gradient_x + gradient_y + laplacian
-    weights = (energy + floor) ** gamma
-    flat_weights = weights.reshape(-1).astype(np.float64, copy=False)
-    weight_sum = float(flat_weights.sum())
-    if weight_sum <= 0:
-        raise ValueError("Texture-energy probing produced non-positive total weight.")
-    return flat_weights / weight_sum
+    return gradient_x + gradient_y + laplacian
 
 
-def build_laplacian_residual_probabilities(
-    sampling_image: np.ndarray,
-    distribution_params: dict | None = None,
-) -> np.ndarray:
-    params = distribution_params or {}
-    gamma = _resolve_positive_scale(params, "gamma", 1.0)
-    floor = _resolve_nonnegative_value(params, "floor", 1e-6)
-
-    image = sampling_image.astype(np.float32, copy=False)
+def _laplacian_residual_map(image: np.ndarray, params: dict) -> np.ndarray:
+    """|4-neighbour Laplacian|; float32, zero 1-px border (legacy bit-exact)."""
+    image = image.astype(np.float32, copy=False)
     laplacian = np.zeros_like(image, dtype=np.float32)
     laplacian[1:-1, 1:-1] = np.abs(
         4.0 * image[1:-1, 1:-1]
@@ -175,13 +171,185 @@ def build_laplacian_residual_probabilities(
         - image[1:-1, :-2]
         - image[1:-1, 2:]
     )
+    return laplacian
 
-    weights = (laplacian + floor) ** gamma
+
+def _local_variance_map(image: np.ndarray, params: dict) -> np.ndarray:
+    """Windowed local variance E[X^2] - E[X]^2 (box window, reflect borders).
+
+    Targets variance-driven cost models (MiPOD estimates per-pixel variance in a
+    local neighbourhood; ``window`` defaults to 9 to match that scale).
+    """
+    window = int(params["window"])
+    values = image.astype(np.float64, copy=False)
+    mean = ndimage.uniform_filter(values, size=window, mode="reflect")
+    mean_sq = ndimage.uniform_filter(values * values, size=window, mode="reflect")
+    # Clip tiny negative values from floating-point cancellation on flat regions.
+    return np.maximum(mean_sq - mean * mean, 0.0)
+
+
+# Daubechies-8 (8 vanishing moments, 16 taps) high-pass decomposition filter --
+# the wavelet bank used by WOW / S-UNIWARD (constants from the reference
+# S-UNIWARD implementation). The low-pass half is derived via the QMF relation.
+DB8_HPDF = np.array(
+    [
+        -0.0544158422, 0.3128715909, -0.6756307363, 0.5853546837,
+        0.0158291053, -0.2840155430, -0.0004724846, 0.1287474266,
+        0.0173693010, -0.0440882539, -0.0139810279, 0.0087460940,
+        0.0048703530, -0.0003917404, -0.0006754494, -0.0001174768,
+    ],
+    dtype=np.float64,
+)
+DB8_LPDF = ((-1.0) ** np.arange(DB8_HPDF.size)) * DB8_HPDF[::-1]
+
+
+def _wavelet_energy_map(image: np.ndarray, params: dict) -> np.ndarray:
+    """1-level undecimated directional wavelet detail energy |LH|+|HL|+|HH|.
+
+    Separable 16-tap Daubechies-8 filtering with symmetric (reflect) borders --
+    the residual bank modern adaptive embedders (WOW / S-UNIWARD) build their
+    costs from; high detail energy marks pixels those embedders prefer.
+    """
+    values = image.astype(np.float64, copy=False)
+
+    def separable(row_filter: np.ndarray, col_filter: np.ndarray) -> np.ndarray:
+        filtered = ndimage.convolve1d(values, row_filter, axis=1, mode="reflect")
+        return ndimage.convolve1d(filtered, col_filter, axis=0, mode="reflect")
+
+    lh = separable(DB8_LPDF, DB8_HPDF)
+    hl = separable(DB8_HPDF, DB8_LPDF)
+    hh = separable(DB8_HPDF, DB8_HPDF)
+    return np.abs(lh) + np.abs(hl) + np.abs(hh)
+
+
+# Fixed SRM-style high-pass bank: (kernel, normaliser) pairs. The normalisers
+# are the SRM quantisation constants so no single kernel dominates the sum.
+SRM_KERNELS: tuple[tuple[np.ndarray, float], ...] = (
+    (np.array([[1.0, -1.0]]), 1.0),                       # 1st-order horizontal
+    (np.array([[1.0], [-1.0]]), 1.0),                     # 1st-order vertical
+    (
+        np.array([[-1.0, 2.0, -1.0], [2.0, -4.0, 2.0], [-1.0, 2.0, -1.0]]),
+        4.0,
+    ),                                                    # 3x3 "KB" predictor
+    (
+        np.array(
+            [
+                [-1.0, 2.0, -2.0, 2.0, -1.0],
+                [2.0, -6.0, 8.0, -6.0, 2.0],
+                [-2.0, 8.0, -12.0, 8.0, -2.0],
+                [2.0, -6.0, 8.0, -6.0, 2.0],
+                [-1.0, 2.0, -2.0, 2.0, -1.0],
+            ]
+        ),
+        12.0,
+    ),                                                    # 5x5 "KV" predictor
+)
+
+
+def _srm_residual_map(image: np.ndarray, params: dict) -> np.ndarray:
+    """Sum of normalised absolute residuals over the fixed SRM kernel bank.
+
+    A no-learning preview of the SRM rung of the estimator ladder: pixels that
+    are hard to predict from their neighbourhood score high.
+    """
+    values = image.astype(np.float64, copy=False)
+    energy = np.zeros_like(values)
+    for kernel, normaliser in SRM_KERNELS:
+        energy += np.abs(ndimage.convolve(values, kernel, mode="reflect")) / normaliser
+    return energy
+
+
+SCORE_MAP_BUILDERS: dict[str, Callable[[np.ndarray, dict], np.ndarray]] = {
+    "texture_energy": _texture_energy_map,
+    "laplacian_residual": _laplacian_residual_map,
+    "local_variance": _local_variance_map,
+    "wavelet_energy": _wavelet_energy_map,
+    "srm_residual": _srm_residual_map,
+}
+# Per-distribution extra parameter defaults (beyond the shared gamma/floor).
+SCORE_MAP_EXTRA_DEFAULTS: dict[str, dict] = {
+    "local_variance": {"window": 9},
+}
+
+IMAGE_ADAPTIVE_PROBE_DISTRIBUTIONS = frozenset(SCORE_MAP_BUILDERS)
+SUPPORTED_PROBE_DISTRIBUTIONS = IMAGE_ADAPTIVE_PROBE_DISTRIBUTIONS | {
+    "uniform",
+    "center_gaussian",
+    "center_laplace",
+    "edge_gaussian",
+}
+
+
+def resolve_score_map_params(
+    distribution: str,
+    distribution_params: dict | None = None,
+) -> dict:
+    """Fully resolved parameter dict (registry defaults + overrides), validated.
+
+    Persist the result next to experiment outputs so every run records the
+    exact score-map configuration it used.
+    """
+    if distribution not in SCORE_MAP_BUILDERS:
+        raise ValueError(
+            f"'{distribution}' is not an image-adaptive distribution. "
+            f"Adaptive: {sorted(SCORE_MAP_BUILDERS)}"
+        )
+    params: dict = {"gamma": 1.0, "floor": 1e-6}
+    params.update(SCORE_MAP_EXTRA_DEFAULTS.get(distribution, {}))
+    params.update(distribution_params or {})
+    params["gamma"] = _resolve_positive_scale(params, "gamma", 1.0)
+    params["floor"] = _resolve_nonnegative_value(params, "floor", 1e-6)
+    if "window" in params:
+        window = int(params["window"])
+        if window < 3 or window % 2 == 0:
+            raise ValueError(f"Expected 'window' to be an odd integer >= 3, got {params['window']}.")
+        params["window"] = window
+    return params
+
+
+def build_score_map(
+    distribution: str,
+    image: np.ndarray,
+    distribution_params: dict | None = None,
+) -> np.ndarray:
+    """Raw 2-D energy map for an image-adaptive distribution (ranking scores)."""
+    params = resolve_score_map_params(distribution, distribution_params)
+    return SCORE_MAP_BUILDERS[distribution](image, params)
+
+
+def build_adaptive_probabilities(
+    distribution: str,
+    sampling_image: np.ndarray,
+    distribution_params: dict | None = None,
+) -> np.ndarray:
+    """Sampling probabilities: (energy + floor) ** gamma, normalised to sum 1.
+
+    The op order (energy in the builder's dtype, floor/gamma as python floats,
+    then flatten -> float64 -> normalise) reproduces the pre-registry
+    implementations bit-exactly for texture_energy / laplacian_residual.
+    """
+    params = resolve_score_map_params(distribution, distribution_params)
+    energy = SCORE_MAP_BUILDERS[distribution](sampling_image, params)
+    weights = (energy + params["floor"]) ** params["gamma"]
     flat_weights = weights.reshape(-1).astype(np.float64, copy=False)
     weight_sum = float(flat_weights.sum())
     if weight_sum <= 0:
-        raise ValueError("Laplacian-residual probing produced non-positive total weight.")
+        raise ValueError(f"'{distribution}' probing produced non-positive total weight.")
     return flat_weights / weight_sum
+
+
+def build_texture_energy_probabilities(
+    sampling_image: np.ndarray,
+    distribution_params: dict | None = None,
+) -> np.ndarray:
+    return build_adaptive_probabilities("texture_energy", sampling_image, distribution_params)
+
+
+def build_laplacian_residual_probabilities(
+    sampling_image: np.ndarray,
+    distribution_params: dict | None = None,
+) -> np.ndarray:
+    return build_adaptive_probabilities("laplacian_residual", sampling_image, distribution_params)
 
 
 def build_sampling_probabilities(
@@ -195,36 +363,25 @@ def build_sampling_probabilities(
         return None
 
     params = distribution_params or {}
+
+    if distribution in IMAGE_ADAPTIVE_PROBE_DISTRIBUTIONS:
+        if sampling_image is None:
+            raise ValueError(f"'{distribution}' probing requires a sampling image.")
+        if tuple(sampling_image.shape) != tuple(image_shape):
+            raise ValueError(
+                "Sampling image shape does not match the recorded image shape: "
+                f"{sampling_image.shape} vs {image_shape}"
+            )
+        return build_adaptive_probabilities(
+            distribution,
+            sampling_image=sampling_image,
+            distribution_params=params,
+        )
+
     rows = np.arange(height, dtype=np.float64)[:, None]
     cols = np.arange(width, dtype=np.float64)[None, :]
     center_row = 0.5 * (height - 1)
     center_col = 0.5 * (width - 1)
-
-    if distribution == "texture_energy":
-        if sampling_image is None:
-            raise ValueError("Texture-energy probing requires a sampling image.")
-        if tuple(sampling_image.shape) != tuple(image_shape):
-            raise ValueError(
-                "Sampling image shape does not match the recorded image shape: "
-                f"{sampling_image.shape} vs {image_shape}"
-            )
-        return build_texture_energy_probabilities(
-            sampling_image=sampling_image,
-            distribution_params=params,
-        )
-
-    if distribution == "laplacian_residual":
-        if sampling_image is None:
-            raise ValueError("Laplacian-residual probing requires a sampling image.")
-        if tuple(sampling_image.shape) != tuple(image_shape):
-            raise ValueError(
-                "Sampling image shape does not match the recorded image shape: "
-                f"{sampling_image.shape} vs {image_shape}"
-            )
-        return build_laplacian_residual_probabilities(
-            sampling_image=sampling_image,
-            distribution_params=params,
-        )
 
     if distribution == "center_gaussian":
         sigma_row = _resolve_positive_scale(params, "sigma_row", 0.2 * height)

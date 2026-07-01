@@ -17,12 +17,12 @@ from read_changes import (
     iter_record_paths,
     load_change_record,
     resolve_probe_image_path,
+    resolve_score_map_params,
 )
 
 
 # These module-level constants are the DEFAULTS. Override any of them on the command line
-# (see build_parser); the reporting scripts import these names, so they remain the source of truth
-# for the default result location. Committed defaults reproduce the published experiment in
+# (see build_parser). Committed defaults reproduce the published experiment in
 # experiments/probing_only (texture_energy, fixed seed 12345).
 COVER_ROOT = Path("ALASKA_v2_TIFF_512_GrayScale_50")
 EXPERIMENT_ROOT = Path("experiments/probing_only")
@@ -356,6 +356,11 @@ def main(argv: list[str] | None = None) -> None:
                 "probe_budget_fractions": PROBE_BUDGET_FRACTIONS,
                 "probe_distribution": PROBE_DISTRIBUTION,
                 "probe_distribution_params": PROBE_DISTRIBUTION_PARAMS,
+                "resolved_distribution_params": (
+                    resolve_score_map_params(PROBE_DISTRIBUTION, PROBE_DISTRIBUTION_PARAMS)
+                    if PROBE_DISTRIBUTION in IMAGE_ADAPTIVE_PROBE_DISTRIBUTIONS
+                    else None
+                ),
                 "probe_image_source": PROBE_IMAGE_SOURCE,
                 "raw_csv": str(RAW_CSV.resolve()),
                 "summary_csv": str(SUMMARY_CSV.resolve()),
