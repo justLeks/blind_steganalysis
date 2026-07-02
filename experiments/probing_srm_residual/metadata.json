@@ -1,0 +1,45 @@
+{
+  "cover_root": "/Users/pavloyatsura/Documents/phd/blind_steganalysis/ALASKA_v2_TIFF_512_GrayScale_50",
+  "experiment_root": "/Users/pavloyatsura/Documents/phd/blind_steganalysis/experiments/probing_srm_residual",
+  "steganogram_root": "/Users/pavloyatsura/Documents/phd/blind_steganalysis/experiments/probing_only/steganograms",
+  "methods": [
+    "HUGO",
+    "MIPOD"
+  ],
+  "alphas": [
+    0.03,
+    0.05,
+    0.1,
+    0.2,
+    0.3,
+    0.4,
+    0.5
+  ],
+  "embed_seed": 12345,
+  "configured_probe_seed": 12345,
+  "run_probe_seed": 12345,
+  "probe_seed_mode": "configured_fixed",
+  "probe_budget_fractions": [
+    0.01,
+    0.05,
+    0.1,
+    0.2,
+    0.3,
+    0.4,
+    0.5
+  ],
+  "probe_distribution": "srm_residual",
+  "probe_distribution_params": {
+    "gamma": 1.0,
+    "floor": 1e-06
+  },
+  "resolved_distribution_params": {
+    "gamma": 1.0,
+    "floor": 1e-06
+  },
+  "probe_image_source": "stego",
+  "raw_csv": "/Users/pavloyatsura/Documents/phd/blind_steganalysis/experiments/probing_srm_residual/probe_raw.csv",
+  "summary_csv": "/Users/pavloyatsura/Documents/phd/blind_steganalysis/experiments/probing_srm_residual/probe_summary.csv",
+  "raw_rows": 9800,
+  "summary_rows": 98
+}
