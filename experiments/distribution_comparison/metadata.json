@@ -1,0 +1,123 @@
+{
+  "benchmark_root": "/Users/pavloyatsura/Documents/phd/blind_steganalysis/experiments/distribution_benchmark",
+  "benchmark_metadata": {
+    "steganogram_root": "/Users/pavloyatsura/Documents/phd/blind_steganalysis/experiments/probing_only/steganograms",
+    "cover_root": "/Users/pavloyatsura/Documents/phd/blind_steganalysis/ALASKA_v2_TIFF_512_GrayScale_50",
+    "methods": [
+      "HUGO",
+      "MIPOD"
+    ],
+    "alphas": [
+      0.03,
+      0.05,
+      0.1,
+      0.2,
+      0.3,
+      0.4,
+      0.5
+    ],
+    "budgets": [
+      0.01,
+      0.05,
+      0.1,
+      0.2,
+      0.3,
+      0.4,
+      0.5
+    ],
+    "localizers": [
+      "uniform",
+      "texture_energy_stego",
+      "texture_energy_cover",
+      "laplacian_residual_stego",
+      "laplacian_residual_cover",
+      "local_variance_stego",
+      "local_variance_cover",
+      "wavelet_energy_stego",
+      "wavelet_energy_cover",
+      "srm_residual_stego",
+      "srm_residual_cover",
+      "oracle"
+    ],
+    "score_map_params": {
+      "laplacian_residual": {
+        "gamma": 1.0,
+        "floor": 1e-06
+      },
+      "local_variance": {
+        "gamma": 1.0,
+        "floor": 1e-06,
+        "window": 9
+      },
+      "srm_residual": {
+        "gamma": 1.0,
+        "floor": 1e-06
+      },
+      "texture_energy": {
+        "gamma": 1.0,
+        "floor": 1e-06
+      },
+      "wavelet_energy": {
+        "gamma": 1.0,
+        "floor": 1e-06
+      }
+    },
+    "images_per_config": "all",
+    "bootstrap_resamples": 2000,
+    "seed": 12345,
+    "n_raw_rows": 16800,
+    "n_summary_rows": 168,
+    "note": "uniform localizer reported as analytic expectation (AP=prevalence, recall=fraction)."
+  },
+  "probing_roots": [
+    "/Users/pavloyatsura/Documents/phd/blind_steganalysis/experiments/probing_only",
+    "/Users/pavloyatsura/Documents/phd/blind_steganalysis/experiments/probing_uniform",
+    "/Users/pavloyatsura/Documents/phd/blind_steganalysis/experiments/probing_laplacian_residual",
+    "/Users/pavloyatsura/Documents/phd/blind_steganalysis/experiments/probing_local_variance",
+    "/Users/pavloyatsura/Documents/phd/blind_steganalysis/experiments/probing_wavelet_energy",
+    "/Users/pavloyatsura/Documents/phd/blind_steganalysis/experiments/probing_srm_residual"
+  ],
+  "cover_root": "/Users/pavloyatsura/Documents/phd/blind_steganalysis/ALASKA_v2_TIFF_512_GrayScale_50",
+  "steganogram_root": "/Users/pavloyatsura/Documents/phd/blind_steganalysis/experiments/probing_only/steganograms",
+  "figure_alphas": [
+    0.05,
+    0.2
+  ],
+  "panel_alpha": 0.2,
+  "panel_stems": [
+    "00061",
+    "00025",
+    "00016"
+  ],
+  "bootstrap_resamples": 2000,
+  "seed": 12345,
+  "dpi": 300,
+  "matplotlib_version": "3.10.6",
+  "figures": [
+    "fig_recall_vs_budget_hugo_alpha0p05.png",
+    "fig_lift_vs_budget_hugo_alpha0p05.png",
+    "fig_recall_vs_budget_hugo_alpha0p2.png",
+    "fig_lift_vs_budget_hugo_alpha0p2.png",
+    "fig_ap_vs_alpha_hugo.png",
+    "fig_cover_vs_stego_hugo.png",
+    "fig_sampling_recall_vs_budget_hugo_alpha0p2.png",
+    "fig_recall_vs_budget_mipod_alpha0p05.png",
+    "fig_lift_vs_budget_mipod_alpha0p05.png",
+    "fig_recall_vs_budget_mipod_alpha0p2.png",
+    "fig_lift_vs_budget_mipod_alpha0p2.png",
+    "fig_ap_vs_alpha_mipod.png",
+    "fig_cover_vs_stego_mipod.png",
+    "fig_sampling_recall_vs_budget_mipod_alpha0p2.png",
+    "fig_ap_efficiency_vs_alpha_hugo.png",
+    "fig_ap_efficiency_vs_alpha_mipod.png"
+  ],
+  "panels": [
+    "panel_hugo_alpha0p2_00061.png",
+    "panel_hugo_alpha0p2_00025.png",
+    "panel_hugo_alpha0p2_00016.png",
+    "panel_mipod_alpha0p2_00061.png",
+    "panel_mipod_alpha0p2_00025.png",
+    "panel_mipod_alpha0p2_00016.png"
+  ],
+  "note": "All figures are grayscale-only (gray level x line style x marker); panels are independently percentile-normalised to [p1, p99]."
+}

@@ -30,8 +30,13 @@ varies more with embedding level for HUGO than MiPOD.
 | `embedding.py` | Simulate HUGO/MiPOD via `conseal`; record `*_changes.npz` + `manifest.json` | Per-image SHA-256 seeds → reproducible carriers; proper argparse CLI. **Best-engineered module.** |
 | `read_changes.py` | Probing engine: distributions, weighted sampling, summaries, CLI | Distributions: `uniform`, `center_gaussian`, `center_laplace`, `edge_gaussian`, `texture_energy`, `laplacian_residual`. |
 | `run_probing_experiment.py` | Sweep `methods × alphas × budget-fractions`; precision/recall | Efficient exponential-race (Efraimidis–Spirakis) weighted sample-without-replacement. |
-| `probe.py` | Single-run entry point | Config-as-globals. |
-| `generate_*_excel.py`, `build_texture_energy_theses_docx.py`, `make_probing_method_illustration.py`, `render_*` | Reporting / figures / paper production | Large, partly one-off; see §4.10. |
+
+> **2026-07-01:** `probe.py` (config-as-globals single-run entry point) and all paper-production tooling
+> (`generate_*_excel.py`, `build_*_docx.py`, `make_probing_method_illustration.py`, `render_*`) were
+> **removed** by project decision — reporting artifacts are recalculated from the tracked CSVs; figures
+> now come from `make_comparison_figures.py` (matplotlib, grayscale). `read_changes.py` gained a
+> score-map registry (`SCORE_MAP_BUILDERS`: texture_energy, laplacian_residual, local_variance,
+> wavelet_energy, srm_residual) and `run_localization_benchmark.py` brackets all of them.
 
 **Data.** ALASKA v2 grayscale 512×512 — a 10K set (≈2.5 GB) and a 50-image working subset. Experiment
 outputs live under `experiments/` (gitignored). The stored result set is `experiments/probing_only`
@@ -55,10 +60,11 @@ outputs live under `experiments/` (gitignored). The stored result set is `experi
 
 ### MUST-DO — scientific rigor (these gate the paper's claims)
 
-**4.1 — The lift-over-random control was never run.**
-`generate_distribution_comparison_excel.py` reads `experiments/probing_uniform/probe_summary.csv`, but
-**that directory does not exist** — the uniform-random baseline the draft's own reviewer explicitly asks
-for ("*how can we compare … like naïve probing of random pixels?*") has no data behind it.
+**4.1 — The lift-over-random control was never run.** *(Resolved 2026-07-01: `experiments/probing_uniform`
+now exists — the uniform baseline is run alongside every other distribution, and the dangling
+`generate_distribution_comparison_excel.py` reference is gone with that script's removal.)*
+Originally: the uniform-random baseline the draft's own reviewer explicitly asks for ("*how can we
+compare … like naïve probing of random pixels?*") had no data behind it.
 
 This matters because, for sampling-without-replacement, the random baseline is **analytically exact**:
 `E[recall] = B/N` (hypergeometric). So the **lift is already provable** from the stored results:
@@ -133,11 +139,9 @@ within tolerance; seed determinism (same seed → same carriers/probes); shape/v
 in this environment). It is process-global and order-sensitive. → Isolate behind a documented helper and an
 env flag; note the upstream cause.
 
-**4.10 — Paper-production tooling is tangled with the research core.**
-`build_texture_energy_theses_docx.py` performs raw DOCX/XML surgery and hardcodes an absolute path
-(`/Users/.../Downloads/...`); the formula renderers and Excel builders are likewise one-off. None will run
-on another machine. → Split paper tooling into `reporting/` (or `paper/`); prefer matplotlib figures + a
-results notebook over programmatic DOCX editing.
+**4.10 — Paper-production tooling is tangled with the research core.** *(Resolved 2026-07-01 by
+removal: all Excel/DOCX/formula tooling deleted per project decision — everything paper-related is
+recalculated; grayscale matplotlib figures come from `make_comparison_figures.py`.)*
 
 ### SHOULD / LATER (extension phase)
 
@@ -148,8 +152,10 @@ results notebook over programmatic DOCX editing.
   package as the code grows.
 - **4.13 — Narrow coverage.** Only HUGO/MiPOD, spatial domain. `conseal` also offers S-UNIWARD / HILL /
   WOW and JPEG-domain methods → breadth for generalization claims.
-- **4.14 — Single hand-crafted feature.** The texture-energy map is one descriptor; the natural research
-  arc is a **ladder** of selection-channel estimators (see `ROADMAP.md`).
+- **4.14 — Single hand-crafted feature.** *(Partially addressed 2026-07-01: the score-map registry now
+  holds five hand-crafted maps — texture energy, Laplacian residual, local variance, wavelet detail
+  energy, fixed-kernel SRM residual — compared in `experiments/distribution_comparison/`. The learned
+  rungs of the ladder remain future work — see `ROADMAP.md`.)*
 
 ## 5. One-line verdict
 

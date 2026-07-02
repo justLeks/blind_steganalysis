@@ -24,20 +24,18 @@ random (floor)  →  texture-energy (current)  →  SRM residuals  →  learned 
 
 ---
 
-## Milestone 1 — Set the brackets & fix metrics  *(must-do science)*
+## Milestone 1 — Set the brackets & fix metrics  *(DONE 2026-06-25; see `experiments/localization_benchmark/FINDINGS.md`)*
 
 **Why:** the current claims are uninterpretable without floor, ceiling, and honest metrics (Assessment §4.1–4.5).
 
-- [ ] **Uniform random baseline** → `experiments/probing_uniform`; overlay the analytic `recall = B/N`
-      reference line. Fixes the dangling reference in `generate_distribution_comparison_excel.py`.
-- [ ] **Oracle localizer** from `conseal`'s selection channel. Rank MiPOD by `mipod.probability` desc,
-      HUGO by `hugo.compute_cost_adjusted` asc (monotone in change-probability — verify monotonicity once).
-      Produce upper-bound curves and the texture-energy-vs-oracle gap.
-- [ ] **Cover-vs-stego ablation** using the existing `probe_image_source` switch; write the
-      *localization-not-detection* scope statement based on the result.
-- [ ] **Metric upgrade**: add AP/PR-AUC, recall@budget, lift@budget as first-class outputs; the per-pixel
-      `E` score is itself a detector, so AP needs no budget at all.
-- [ ] **Uncertainty**: bootstrap/percentile CIs; scale n past 100 using the 10K set; report per-image variance.
+- [x] **Uniform random baseline** → analytic floor in the benchmark; the physical `experiments/probing_uniform`
+      run was generated 2026-07-01 with the distribution-comparison campaign.
+- [x] **Oracle localizer** from `conseal`'s selection channel (`selection_channel.py`). Rank MiPOD by
+      `mipod.probability` desc, HUGO by `hugo.compute_cost_adjusted` asc. Upper-bound curves + texture-vs-oracle gap.
+- [x] **Cover-vs-stego ablation** — cover ≈ stego; *localization-not-detection* scope statement written.
+- [x] **Metric upgrade**: AP/PR-AUC, recall@budget, lift@budget first-class (`localization_metrics.py`).
+- [x] **Uncertainty**: bootstrap/percentile CIs on all headline numbers. (Scaling n past 100 on the 10K set
+      remains open.)
 
 **Primary skill:** `engineering-skills:senior-data-scientist`. **Supporting:** `senior-data-engineer` (scale-up).
 
@@ -56,19 +54,28 @@ random (floor)  →  texture-energy (current)  →  SRM residuals  →  learned 
       `E[#changes]=Σp` identity; metric correctness.
 - [x] **Isolate** the `numba.jit` workaround behind a documented `prepare_conseal_import()` + env flags
       (`NUMBA_DISABLE_JIT`, `CONSEAL_DISABLE_NUMBA_CACHE`).
-- [x] **Decouple reporting** hardcoded path → `THESES_SOURCE_DOCX` env var with a clear error; no
-      machine-specific path remains in `*.py`. *Deferred (do-no-harm to the live paper pipeline):* the
-      physical move of the Excel/DOCX generators into `reporting/` and the matplotlib/notebook migration —
-      these run the active conference submission, so reorganise only on request. `probe.py` and
-      `make_probing_method_illustration.py` still use config-as-globals; migrate when next touched.
+- [x] **Decouple reporting** — superseded 2026-07-01: all paper-production tooling (Excel/DOCX/formula
+      renderers, `make_probing_method_illustration.py`) and the legacy `probe.py` runner were **deleted**
+      by project decision; reporting artifacts are recalculated from the tracked CSVs and grayscale
+      matplotlib figures (`make_comparison_figures.py`). No config-as-globals scripts remain.
 
 **Skills used:** `engineering-skills:tdd-guide` (tests) + `senior-data-engineer` (config/packaging).
+
+## Milestone 3a — Hand-crafted score-map comparison  *(DONE 2026-07-01)*
+
+**What:** widen the "current method" rung before any learning: a score-map registry
+(`read_changes.SCORE_MAP_BUILDERS`) with `texture_energy`, `laplacian_residual`, `local_variance`
+(targets MiPOD's variance model), `wavelet_energy` (WOW/S-UNIWARD 16-tap Daubechies-8 bank) and a
+fixed-kernel `srm_residual`; per-distribution probing runs (`experiments/probing_<dist>/`); a
+12-localizer bracketed benchmark (`experiments/distribution_benchmark/`); comparison CSVs + grayscale
+figures + score-map panels (`experiments/distribution_comparison/`, see its `FINDINGS.md`).
 
 ## Milestone 3 — Estimator ladder  *(future; next-paper novelty, deferred)*
 
 **Why:** texture-energy is a single hand-crafted feature; climbing the ladder is the novelty arc.
 
-- [ ] **SRM-style residual localizer** — richer residual descriptors than the single 4-neighbour Laplacian.
+- [ ] **SRM-style residual localizer** — *fixed-kernel version shipped in M3a (`srm_residual`)*; the
+      full SRM feature set / learned variant remains open.
 - [ ] **Learned CNN selection-channel predictor** — train a small CNN to predict per-pixel change
       probability from the stego image (the true "blind selection-channel estimation"); compare to oracle.
 - [ ] **Breadth** — add `conseal` methods (S-UNIWARD/HILL/WOW; JPEG-domain) and color, to test generalization.
