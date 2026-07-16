@@ -1,6 +1,7 @@
 import argparse
 import hashlib
 import json
+import multiprocessing
 import os
 import sys
 from pathlib import Path
@@ -153,12 +154,80 @@ def write_manifest(manifest_path: Path, records: list[dict]) -> None:
     manifest_path.write_text(json.dumps(records, indent=2), encoding="utf-8")
 
 
+def _embed_one_image(
+    image_path: Path,
+    src_dir: Path,
+    dst_dir: Path,
+    method: str,
+    alpha: float,
+    base_seed: int,
+) -> dict:
+    """Embed a single cover and write its stego image + change record. Returns the manifest record.
+
+    Module-level (picklable) so multiprocessing workers can run it. Deterministic: the per-image seed
+    depends only on ``base_seed`` and the cover's relative path, never on worker count or order.
+    """
+    relative_path = image_path.relative_to(src_dir)
+    image_seed = derive_image_seed(base_seed, relative_path)
+    cover_image = to_u8_array(image_path)
+    stego_image = simulate_embedding(
+        cover_image=cover_image,
+        method=method,
+        alpha=alpha,
+        seed=image_seed,
+    )
+    changed_flat_indices = change_indices(stego_image=stego_image, cover_image=cover_image)
+
+    out_dir = dst_dir / relative_path.parent
+    out_dir.mkdir(parents=True, exist_ok=True)
+
+    stego_filename = f"{image_path.stem}_stego.png"
+    record_filename = f"{image_path.stem}_changes.npz"
+
+    stego_path = out_dir / stego_filename
+    record_path = out_dir / record_filename
+
+    Image.fromarray(stego_image).save(stego_path)
+    save_change_record(
+        record_path=record_path,
+        relative_cover_path=relative_path,
+        relative_stego_path=relative_path.parent / stego_filename,
+        image_shape=cover_image.shape,
+        changed_flat_indices=changed_flat_indices,
+        method=method,
+        alpha=alpha,
+        seed=image_seed,
+    )
+
+    return {
+        "cover_image": str(relative_path),
+        "stego_image": str(relative_path.parent / stego_filename),
+        "change_record": str(relative_path.parent / record_filename),
+        "method": method,
+        "alpha": float(alpha),
+        "seed": int(image_seed),
+        "height": int(cover_image.shape[0]),
+        "width": int(cover_image.shape[1]),
+        "used_pixels": int(changed_flat_indices.size),
+        "used_pixel_fraction": float(changed_flat_indices.size / cover_image.size),
+        "used_pixel_percentage": float(100.0 * changed_flat_indices.size / cover_image.size),
+        "num_changed": int(changed_flat_indices.size),
+        "change_rate": float(changed_flat_indices.size / cover_image.size),
+    }
+
+
+def _embed_one_image_star(task: tuple) -> dict:
+    """Unpack helper for ``Pool.imap`` (a picklable top-level stand-in for ``starmap`` + laziness)."""
+    return _embed_one_image(*task)
+
+
 def embed_and_log(
     src_dir: str | Path,
     dst_dir: str | Path,
     method: str = "HUGO",
     alpha: float = 0.4,
     seed: int = 12345,
+    workers: int = 1,
 ) -> list[dict]:
     src_dir = Path(src_dir).expanduser().resolve()
     dst_dir = Path(dst_dir).expanduser().resolve()
@@ -168,6 +237,8 @@ def embed_and_log(
         raise NotADirectoryError(f"Source path is not a directory: {src_dir}")
     if not 0 <= alpha <= 1:
         raise ValueError(f"alpha must be between 0 and 1, got {alpha}.")
+    if workers < 1:
+        raise ValueError(f"workers must be >= 1, got {workers}.")
 
     image_paths = list(iter_image_files(src_dir))
     if not image_paths:
@@ -176,62 +247,25 @@ def embed_and_log(
         )
 
     dst_dir.mkdir(parents=True, exist_ok=True)
-    records: list[dict] = []
     normalized_method = method.upper()
     if normalized_method not in SUPPORTED_METHODS:
         raise ValueError(
             f"Unsupported method '{method}'. Supported methods: {sorted(SUPPORTED_METHODS)}"
         )
 
-    for image_path in image_paths:
-        relative_path = image_path.relative_to(src_dir)
-        image_seed = derive_image_seed(seed, relative_path)
-        cover_image = to_u8_array(image_path)
-        stego_image = simulate_embedding(
-            cover_image=cover_image,
-            method=normalized_method,
-            alpha=alpha,
-            seed=image_seed,
-        )
-        changed_flat_indices = change_indices(stego_image=stego_image, cover_image=cover_image)
-
-        out_dir = dst_dir / relative_path.parent
-        out_dir.mkdir(parents=True, exist_ok=True)
-
-        stego_filename = f"{image_path.stem}_stego.png"
-        record_filename = f"{image_path.stem}_changes.npz"
-
-        stego_path = out_dir / stego_filename
-        record_path = out_dir / record_filename
-
-        Image.fromarray(stego_image).save(stego_path)
-        save_change_record(
-            record_path=record_path,
-            relative_cover_path=relative_path,
-            relative_stego_path=relative_path.parent / stego_filename,
-            image_shape=cover_image.shape,
-            changed_flat_indices=changed_flat_indices,
-            method=normalized_method,
-            alpha=alpha,
-            seed=image_seed,
-        )
-
-        record = {
-            "cover_image": str(relative_path),
-            "stego_image": str(relative_path.parent / stego_filename),
-            "change_record": str(relative_path.parent / record_filename),
-            "method": normalized_method,
-            "alpha": float(alpha),
-            "seed": int(image_seed),
-            "height": int(cover_image.shape[0]),
-            "width": int(cover_image.shape[1]),
-            "used_pixels": int(changed_flat_indices.size),
-            "used_pixel_fraction": float(changed_flat_indices.size / cover_image.size),
-            "used_pixel_percentage": float(100.0 * changed_flat_indices.size / cover_image.size),
-            "num_changed": int(changed_flat_indices.size),
-            "change_rate": float(changed_flat_indices.size / cover_image.size),
-        }
-        records.append(record)
+    tasks = [
+        (image_path, src_dir, dst_dir, normalized_method, alpha, seed)
+        for image_path in image_paths
+    ]
+    if workers == 1:
+        records = [_embed_one_image(*task) for task in tasks]
+    else:
+        # "spawn" gives identical worker behaviour on macOS/Linux and avoids fork-safety issues with
+        # Numba/BLAS threads. Each worker pays a one-time conseal import + JIT warmup. Results are
+        # returned in input order, so the manifest is byte-identical to the sequential path.
+        context = multiprocessing.get_context("spawn")
+        with context.Pool(processes=workers) as pool:
+            records = list(pool.imap(_embed_one_image_star, tasks, chunksize=1))
 
     write_manifest(dst_dir / "manifest.json", records)
     return records
@@ -246,6 +280,13 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--method", default="HUGO", choices=sorted(SUPPORTED_METHODS))
     parser.add_argument("--alpha", type=float, default=0.4)
     parser.add_argument("--seed", type=int, default=12345)
+    parser.add_argument(
+        "--workers",
+        type=int,
+        default=1,
+        help="Parallel worker processes for embedding (default 1 = sequential). "
+        "Per-image seeds are path-derived, so results are identical for any worker count.",
+    )
     return parser
 
 
@@ -270,6 +311,7 @@ if __name__ == "__main__":
             method=args.method,
             alpha=args.alpha,
             seed=args.seed,
+            workers=args.workers,
         )
         target_dir = args.dst_dir
 
