@@ -16,10 +16,12 @@ Metrics per image: Average Precision (primary), ROC-AUC (secondary), and determi
 recall/lift at each budget fraction. Aggregated per (method, alpha, localizer) with percentile
 bootstrap CIs across images.
 
-Reproducibility caveat: one tie-break RNG is shared sequentially across all rows, so per-image
-recall/lift columns only reproduce exactly under an identical (localizers, limit) configuration.
-AP and ROC-AUC are RNG-free and always reproducible. The Milestone-1 run of record lives frozen in
-``experiments/localization_benchmark/``; this script now writes to ``experiments/distribution_benchmark``.
+Reproducibility: the recall/lift tie-break RNG is seeded per record (SHA-256 of config id + record
+name mixed with ``--seed``), so per-image rows are independent of the localizer list, ``--limit``,
+and ``--workers`` — any worker count reproduces bit-identical CSVs. (Before 2026-07-16 one RNG was
+shared sequentially across rows; the frozen runs of record in ``experiments/localization_benchmark``
+and ``experiments/distribution_benchmark`` carry that older tie-break stream — their recall columns
+are not regenerable bit-exact, AP/ROC-AUC are RNG-free and unaffected.)
 
 Reuses already-embedded steganograms (no re-embedding). Config is taken from CLI args and persisted to
 ``metadata.json`` next to the outputs -- the reproducible pattern that replaces config-as-globals.
@@ -32,7 +34,9 @@ from __future__ import annotations
 
 import argparse
 import csv
+import hashlib
 import json
+import multiprocessing
 from pathlib import Path
 
 import numpy as np
@@ -110,17 +114,76 @@ def per_image_scores(localizer, cover, stego, method, alpha):
     return build_adaptive_probabilities(dist, image, SCORE_PARAMS.get(dist))
 
 
+def derive_record_seed(base_seed: int, cfg: str, record_name: str) -> int:
+    """Deterministic per-record tie-break seed: independent of localizer list, limit, and workers."""
+    digest = hashlib.sha256(f"{cfg}|{record_name}".encode("utf-8")).digest()
+    offset = int.from_bytes(digest[:8], "big")
+    return (int(base_seed) + offset) % (2**32)
+
+
+def _evaluate_record(task: tuple) -> list[dict]:
+    """All localizer rows for one change record. Module-level (picklable) for multiprocessing.
+
+    Deterministic: the tie-break RNG is derived from (seed, config id, record name) only, so the
+    output is identical for any worker count or record order.
+    """
+    rp, cfg, method, alpha, localizers, budget_list, budget_pct, cover_root, cdir, base_seed = task
+    budgets = np.asarray(budget_list, dtype=np.float64)
+    rng = np.random.default_rng(derive_record_seed(base_seed, cfg, rp.name))
+
+    r = load_change_record(rp)
+    height, width = r["image_shape"]
+    total = height * width
+    labels = np.zeros(total, dtype=bool)
+    labels[r["changed_flat_indices"]] = True
+    prevalence = float(labels.mean())
+
+    cover = to_u8_array(cover_root / r["cover_relative_path"])
+    stego = to_u8_array(cdir / r["stego_relative_path"])
+
+    rows: list[dict] = []
+    for localizer in localizers:
+        if localizer == "uniform":
+            # Analytic expectation of a random ranker (exact, no Monte-Carlo noise).
+            ap = prevalence
+            roc = 0.5
+            recalls = budgets.copy()
+        else:
+            scores = per_image_scores(localizer, cover, stego, method, alpha)
+            ap = M.average_precision(scores, labels)
+            roc = M.roc_auc(scores, labels)
+            recalls = M.recall_at_budgets(scores, labels, budgets, rng)
+        lifts = M.lift_at_budgets(recalls, budgets)
+
+        row = {
+            "config_id": cfg,
+            "method": method.upper(),
+            "alpha": float(alpha),
+            "record_name": rp.name,
+            "localizer": localizer,
+            "carrier_pixels": int(labels.sum()),
+            "prevalence": prevalence,
+            "average_precision": ap,
+            "roc_auc": roc,
+        }
+        for pct, rec, lift in zip(budget_pct, recalls, lifts):
+            row[f"recall_at_{pct}"] = float(rec)
+            row[f"lift_at_{pct}"] = float(lift)
+        rows.append(row)
+    return rows
+
+
 def evaluate(args) -> None:
     args.localizers = [str(LOCALIZER_ALIASES.get(name, name)) for name in args.localizers]
     for name in args.localizers:
         if name not in ("uniform", "oracle"):
             parse_localizer(name)  # fail fast on typos before the long sweep
+    if args.workers < 1:
+        raise ValueError(f"workers must be >= 1, got {args.workers}.")
 
-    budgets = np.asarray(args.budgets, dtype=np.float64)
     budget_pct = [f"{int(round(100 * b))}" for b in args.budgets]
-    rng = np.random.default_rng(args.seed)
 
-    raw_rows: list[dict] = []
+    tasks: list[tuple] = []
     for method in args.methods:
         for alpha in args.alphas:
             cfg = config_id(method, alpha)
@@ -132,47 +195,23 @@ def evaluate(args) -> None:
             if args.limit:
                 records = records[: args.limit]
             print(f"[run] {cfg}: {len(records)} images")
+            tasks.extend(
+                (rp, cfg, method, alpha, args.localizers, args.budgets, budget_pct,
+                 args.cover_root, cdir, args.seed)
+                for rp in records
+            )
 
-            for rp in records:
-                r = load_change_record(rp)
-                height, width = r["image_shape"]
-                total = height * width
-                labels = np.zeros(total, dtype=bool)
-                labels[r["changed_flat_indices"]] = True
-                prevalence = float(labels.mean())
+    if args.workers == 1:
+        per_record_rows = [_evaluate_record(task) for task in tasks]
+    else:
+        # "spawn" gives identical worker behaviour on macOS/Linux; each worker pays a one-time
+        # conseal import + JIT warmup. imap preserves input order, so the CSVs are byte-identical
+        # to the sequential path (per-record tie-break seeds make rows order-independent anyway).
+        context = multiprocessing.get_context("spawn")
+        with context.Pool(processes=args.workers) as pool:
+            per_record_rows = list(pool.imap(_evaluate_record, tasks, chunksize=4))
 
-                cover = to_u8_array(args.cover_root / r["cover_relative_path"])
-                stego = to_u8_array(cdir / r["stego_relative_path"])
-
-                for localizer in args.localizers:
-                    if localizer == "uniform":
-                        # Analytic expectation of a random ranker (exact, no Monte-Carlo noise).
-                        ap = prevalence
-                        roc = 0.5
-                        recalls = budgets.copy()
-                    else:
-                        scores = per_image_scores(localizer, cover, stego, method, alpha)
-                        ap = M.average_precision(scores, labels)
-                        roc = M.roc_auc(scores, labels)
-                        recalls = M.recall_at_budgets(scores, labels, budgets, rng)
-                    lifts = M.lift_at_budgets(recalls, budgets)
-
-                    row = {
-                        "config_id": cfg,
-                        "method": method.upper(),
-                        "alpha": float(alpha),
-                        "record_name": rp.name,
-                        "localizer": localizer,
-                        "carrier_pixels": int(labels.sum()),
-                        "prevalence": prevalence,
-                        "average_precision": ap,
-                        "roc_auc": roc,
-                    }
-                    for pct, rec, lift in zip(budget_pct, recalls, lifts):
-                        row[f"recall_at_{pct}"] = float(rec)
-                        row[f"lift_at_{pct}"] = float(lift)
-                    raw_rows.append(row)
-
+    raw_rows: list[dict] = [row for rows in per_record_rows for row in rows]
     summary_rows = summarize(raw_rows, budget_pct, args.bootstrap, args.seed)
 
     args.output_root.mkdir(parents=True, exist_ok=True)
@@ -200,6 +239,8 @@ def evaluate(args) -> None:
                 "images_per_config": args.limit or "all",
                 "bootstrap_resamples": args.bootstrap,
                 "seed": args.seed,
+                "workers": args.workers,
+                "tie_break_rng": "per-record (sha256 of config_id|record_name mixed with seed)",
                 "n_raw_rows": len(raw_rows),
                 "n_summary_rows": len(summary_rows),
                 "note": "uniform localizer reported as analytic expectation (AP=prevalence, recall=fraction).",
@@ -266,6 +307,13 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--limit", type=int, default=0, help="Max images per config (0 = all).")
     p.add_argument("--bootstrap", type=int, default=2000, help="Bootstrap resamples for CIs.")
     p.add_argument("--seed", type=int, default=12345)
+    p.add_argument(
+        "--workers",
+        type=int,
+        default=1,
+        help="Parallel worker processes (default 1 = sequential). Tie-break seeds are per-record, "
+        "so results are identical for any worker count.",
+    )
     return p
 
 
