@@ -1,0 +1,70 @@
+{
+  "steganogram_root": "/Users/pavloyatsura/Documents/phd/blind_steganalysis/experiments/probing_10k_hugo_texture_energy/steganograms",
+  "cover_root": "/Users/pavloyatsura/Documents/phd/blind_steganalysis/ALASKA_v2_TIFF_512_GrayScale_10K",
+  "methods": [
+    "HUGO"
+  ],
+  "alphas": [
+    0.03,
+    0.05,
+    0.1,
+    0.2,
+    0.3,
+    0.4,
+    0.5
+  ],
+  "budgets": [
+    0.01,
+    0.05,
+    0.1,
+    0.2,
+    0.3,
+    0.4,
+    0.5
+  ],
+  "localizers": [
+    "uniform",
+    "texture_energy_stego",
+    "texture_energy_cover",
+    "laplacian_residual_stego",
+    "laplacian_residual_cover",
+    "local_variance_stego",
+    "local_variance_cover",
+    "wavelet_energy_stego",
+    "wavelet_energy_cover",
+    "srm_residual_stego",
+    "srm_residual_cover",
+    "oracle"
+  ],
+  "score_map_params": {
+    "laplacian_residual": {
+      "gamma": 1.0,
+      "floor": 1e-06
+    },
+    "local_variance": {
+      "gamma": 1.0,
+      "floor": 1e-06,
+      "window": 9
+    },
+    "srm_residual": {
+      "gamma": 1.0,
+      "floor": 1e-06
+    },
+    "texture_energy": {
+      "gamma": 1.0,
+      "floor": 1e-06
+    },
+    "wavelet_energy": {
+      "gamma": 1.0,
+      "floor": 1e-06
+    }
+  },
+  "images_per_config": "all",
+  "bootstrap_resamples": 2000,
+  "seed": 12345,
+  "workers": 8,
+  "tie_break_rng": "per-record (sha256 of config_id|record_name mixed with seed)",
+  "n_raw_rows": 840000,
+  "n_summary_rows": 84,
+  "note": "uniform localizer reported as analytic expectation (AP=prevalence, recall=fraction)."
+}

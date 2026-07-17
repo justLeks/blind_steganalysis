@@ -1,0 +1,44 @@
+{
+  "cover_root": "/Users/pavloyatsura/Documents/phd/blind_steganalysis/ALASKA_v2_TIFF_512_GrayScale_10K",
+  "experiment_root": "/Users/pavloyatsura/Documents/phd/blind_steganalysis/experiments/probing_10k_hugo_wavelet_energy",
+  "steganogram_root": "/Users/pavloyatsura/Documents/phd/blind_steganalysis/experiments/probing_10k_hugo_texture_energy/steganograms",
+  "methods": [
+    "HUGO"
+  ],
+  "alphas": [
+    0.03,
+    0.05,
+    0.1,
+    0.2,
+    0.3,
+    0.4,
+    0.5
+  ],
+  "embed_seed": 12345,
+  "configured_probe_seed": 12345,
+  "run_probe_seed": 12345,
+  "probe_seed_mode": "configured_fixed",
+  "probe_budget_fractions": [
+    0.01,
+    0.05,
+    0.1,
+    0.2,
+    0.3,
+    0.4,
+    0.5
+  ],
+  "probe_distribution": "wavelet_energy",
+  "probe_distribution_params": {
+    "gamma": 1.0,
+    "floor": 1e-06
+  },
+  "resolved_distribution_params": {
+    "gamma": 1.0,
+    "floor": 1e-06
+  },
+  "probe_image_source": "stego",
+  "raw_csv": "/Users/pavloyatsura/Documents/phd/blind_steganalysis/experiments/probing_10k_hugo_wavelet_energy/probe_raw.csv",
+  "summary_csv": "/Users/pavloyatsura/Documents/phd/blind_steganalysis/experiments/probing_10k_hugo_wavelet_energy/probe_summary.csv",
+  "raw_rows": 490000,
+  "summary_rows": 49
+}

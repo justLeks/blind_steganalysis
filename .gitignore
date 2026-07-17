@@ -15,3 +15,9 @@ out/
 # Bulky deterministic artifacts (re-derivable via embedding.py, seed 12345).
 # CSV/PNG/JSON results under experiments/ ARE tracked.
 experiments/**/steganograms/
+
+# 10K-campaign raw per-image tables: deterministic re-derivable outputs that
+# exceed GitHub's 100 MB file limit (probe_raw ~187 MB each, per_image ~297 MB).
+# Summaries/metadata/figures of those runs ARE tracked.
+experiments/probing_10k_*/probe_raw.csv
+experiments/distribution_benchmark_10k_*/per_image.csv
