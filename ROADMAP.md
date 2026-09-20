@@ -102,6 +102,21 @@ seed step 2–3.
 
 **Primary skill:** `engineering-skills:senior-data-scientist` (trade-off design) + `senior-computer-vision`.
 
+## Milestone 5 — DESSERT-2026 revision campaign  *(2026-09; see `experiments/dessert2026/FINDINGS.md`)*
+
+**Why:** the DESSERT-2026 review asked for a uniform baseline at every budget, strong texture/residual
+baselines, low payloads, a third embedder, uncertainty and paired tests, normalized metrics, and full
+reproducibility. Everything is answered from one n = 1000 campaign (seeded subset of the 10K set).
+
+- [x] **S-UNIWARD** embedding + exact oracle (`embedding.py`, `selection_channel.py`).
+- [x] **Two new score maps**: `gradient_magnitude` (Sobel) and `local_entropy` (9×9, 32 bins).
+- [x] **Metrics**: `precision@B`, normalized area under the recall–budget curve `nAURC(b_max)`, fractional
+      budget labels (`0p5`).
+- [x] **Subset of record** `data/subsets/alaska10k_n1000_seed12345.txt` and `--cover-list` everywhere.
+- [x] **Repeated sampling** (`--repeats K`) and `--workers` in the probing runner (K=1 stays bit-exact).
+- [x] **Paired tests**: `run_paired_tests.py` (Wilcoxon signed-rank, Holm).
+- [x] **Campaign**: `experiments/dessert2026/RUN.md`; paper figures/tables generators.
+
 ---
 
 ## Agents & skills — mapping

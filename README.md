@@ -27,6 +27,7 @@ python3 -m pip install -r requirements.txt    # Python 3.11
 |---|---|---|
 | `ALASKA_v2_TIFF_512_GrayScale_10K/` | ALASKA v2 grayscale 512×512, 10 000 cover TIFFs (full set). | no (external) |
 | `ALASKA_v2_TIFF_512_GrayScale_50/` | **100**-image working subset (the `50` in the name is historical). All published results use it. | no (external) |
+| `data/subsets/alaska10k_n1000_seed12345.txt` | The **1000-cover subset of record** for the DESSERT-2026 campaign (`select_cover_subset.py`, seed 12345); every runner takes it via `--cover-list`. | yes |
 | `experiments/**/steganograms/` | Stego PNGs + `*_changes.npz` carrier records + `manifest.json`. | no — **re-derivable**: embedding is deterministic (per-image SHA-256 seeds from seed 12345), so any runner regenerates them on demand |
 | `experiments/**` (CSV/JSON/PNG) | Experiment results and figures. | **yes** — results of record |
 
@@ -91,6 +92,9 @@ cover TIFFs ──embedding.py──▶ stego PNG + *_changes.npz ──┬─�
 | `run_probing_experiment.py` | Budgeted probing sweep over methods × alphas × budgets → `probe_raw.csv` / `probe_summary.csv`. |
 | `run_localization_benchmark.py` | Bracketed benchmark: `uniform · <map>_{stego,cover} · oracle` → `per_image.csv` / `summary.csv`. |
 | `make_comparison_figures.py` | Cross-distribution CSVs, grayscale metric figures, score-map panels. |
+| `select_cover_subset.py` | Seeded random cover subset → cover-list file. |
+| `run_paired_tests.py` | Paired Wilcoxon signed-rank tests (Holm-corrected) of one localizer against baselines over `per_image.csv`. |
+| `make_paper_figures.py`, `make_illustration_figure.py`, `make_paper_tables.py` | DESSERT-2026 paper figures (recall vs budget, lift vs payload, cover-vs-stego ablation, illustration) and tables (CSV + Markdown). |
 
 ## Run the full pipeline
 
@@ -114,6 +118,21 @@ python3 run_localization_benchmark.py --limit 10                  # quick pass
 
 # 3) Comparison CSVs + grayscale figures → experiments/distribution_comparison.
 python3 make_comparison_figures.py
+```
+
+### DESSERT-2026 revision campaign (n = 1000, HUGO + MiPOD + S-UNIWARD, α from 0.001 bpp)
+
+`experiments/dessert2026/RUN.md` is a runnable bash script: it embeds the 1000-cover subset for the 30
+(method, α) configurations, runs the γ=1 probing sweeps with `--repeats 10` (texture_energy and uniform),
+the 16-localizer benchmark (budgets from 0.5 %, plus precision@B and nAURC columns), and the paired tests.
+Then `make_paper_figures.py`, `make_illustration_figure.py` and `make_paper_tables.py` derive the paper's
+figures and tables. Findings of record: `experiments/dessert2026/FINDINGS.md`.
+
+```bash
+ROOT=experiments/dessert2026 bash experiments/dessert2026/RUN.md      # ~5 h with WORKERS=8
+python3 make_paper_figures.py --root experiments/dessert2026
+python3 make_illustration_figure.py --root experiments/dessert2026 --cover-root ALASKA_v2_TIFF_512_GrayScale_10K
+python3 make_paper_tables.py --root experiments/dessert2026
 ```
 
 ## Outputs
@@ -191,4 +210,6 @@ experiments/
   localization_benchmark/        # Milestone-1 benchmark (frozen record) + FINDINGS.md
   distribution_benchmark/        # 12-localizer benchmark
   distribution_comparison/       # comparison CSVs, figures/, panels/ + FINDINGS.md
+  dessert2026/                   # DESSERT-2026 campaign: RUN.md, benchmark/, probing_*/, paired_tests/,
+                                 #   comparison/figures/, paper/ (tables), FINDINGS.md
 ```
