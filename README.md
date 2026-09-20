@@ -60,8 +60,10 @@ a 0.4–10 % minority, so PR-AUC is honest where ROC-AUC flatters), recall@budge
 | Map | Score | Params | Borders | What it targets |
 |---|---|---|---|---|
 | `texture_energy` | \|dx\| + \|dy\| + \|3×3 Laplacian\| | `gamma`, `floor` | zero frame | the original published method |
+| `gradient_magnitude` | sqrt(Gx² + Gy²), 3×3 Sobel | `gamma`, `floor` | reflect | the classic first-order texture baseline |
 | `laplacian_residual` | \|3×3 Laplacian\| | `gamma`, `floor` | zero frame | ablation: Laplacian term alone |
 | `local_variance` | windowed E[X²] − E[X]² | `window` (9), `gamma`, `floor` | reflect | MiPOD's variance-driven cost model |
+| `local_entropy` | Shannon entropy (bits) of the windowed gray-level histogram, 32 bins | `window` (9), `bins` (32), `gamma`, `floor` | reflect | histogram-complexity baseline |
 | `wavelet_energy` | \|LH\|+\|HL\|+\|HH\|, 16-tap Daubechies-8, undecimated | `gamma`, `floor` | reflect | the WOW / S-UNIWARD filter bank |
 | `srm_residual` | Σ \|conv(x, K)\|/q over 1st-order diffs, 3×3 KB, 5×5 KV | `gamma`, `floor` | reflect | fixed-kernel preview of the SRM rung |
 

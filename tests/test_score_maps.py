@@ -170,7 +170,8 @@ class TestLegacyBitExact(unittest.TestCase):
 
 class TestRegistry(unittest.TestCase):
     def test_registry_complete(self):
-        expected = {"texture_energy", "laplacian_residual", "local_variance", "wavelet_energy", "srm_residual"}
+        expected = {"texture_energy", "gradient_magnitude", "laplacian_residual", "local_variance",
+                    "local_entropy", "wavelet_energy", "srm_residual"}
         self.assertEqual(set(SCORE_MAP_BUILDERS), expected)
         self.assertEqual(IMAGE_ADAPTIVE_PROBE_DISTRIBUTIONS, frozenset(SCORE_MAP_BUILDERS))
         self.assertTrue(IMAGE_ADAPTIVE_PROBE_DISTRIBUTIONS <= SUPPORTED_PROBE_DISTRIBUTIONS)

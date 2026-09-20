@@ -259,16 +259,48 @@ def _srm_residual_map(image: np.ndarray, params: dict) -> np.ndarray:
     return energy
 
 
+def _gradient_magnitude_map(image: np.ndarray, params: dict) -> np.ndarray:
+    """Sobel gradient magnitude sqrt(Gx^2 + Gy^2); float64, reflect borders.
+
+    The classic first-order texture baseline (edges and gray-level ramps).
+    """
+    values = image.astype(np.float64, copy=False)
+    gx = ndimage.sobel(values, axis=1, mode="reflect")
+    gy = ndimage.sobel(values, axis=0, mode="reflect")
+    return np.sqrt(gx * gx + gy * gy)
+
+
+def _local_entropy_map(image: np.ndarray, params: dict) -> np.ndarray:
+    """Shannon entropy (bits) of the windowed gray-level histogram; reflect borders.
+
+    Gray levels are quantised to ``bins`` uniform bins over [0, 255]
+    (bin = floor(x * bins / 256)); the window histogram of each bin is a box
+    filter over the one-hot bin plane, so the map costs ``bins`` uniform filters.
+    """
+    window = int(params["window"])
+    bins = int(params["bins"])
+    levels = (image.astype(np.int64, copy=False) * bins) // 256
+    entropy = np.zeros(image.shape, dtype=np.float64)
+    for k in range(bins):
+        h = ndimage.uniform_filter((levels == k).astype(np.float64), size=window, mode="reflect")
+        nz = h > 0.0
+        entropy[nz] -= h[nz] * np.log2(h[nz])
+    return np.maximum(entropy, 0.0)
+
+
 SCORE_MAP_BUILDERS: dict[str, Callable[[np.ndarray, dict], np.ndarray]] = {
     "texture_energy": _texture_energy_map,
+    "gradient_magnitude": _gradient_magnitude_map,
     "laplacian_residual": _laplacian_residual_map,
     "local_variance": _local_variance_map,
+    "local_entropy": _local_entropy_map,
     "wavelet_energy": _wavelet_energy_map,
     "srm_residual": _srm_residual_map,
 }
 # Per-distribution extra parameter defaults (beyond the shared gamma/floor).
 SCORE_MAP_EXTRA_DEFAULTS: dict[str, dict] = {
     "local_variance": {"window": 9},
+    "local_entropy": {"window": 9, "bins": 32},
 }
 
 IMAGE_ADAPTIVE_PROBE_DISTRIBUTIONS = frozenset(SCORE_MAP_BUILDERS)
@@ -304,6 +336,11 @@ def resolve_score_map_params(
         if window < 3 or window % 2 == 0:
             raise ValueError(f"Expected 'window' to be an odd integer >= 3, got {params['window']}.")
         params["window"] = window
+    if "bins" in params:
+        bins = int(params["bins"])
+        if bins < 2 or bins > 256:
+            raise ValueError(f"Expected 'bins' in [2, 256], got {params['bins']}.")
+        params["bins"] = bins
     return params
 
 

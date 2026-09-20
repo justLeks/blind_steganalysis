@@ -4,7 +4,8 @@ Localizers compared, per (method, alpha), over the recorded carrier masks:
 
 - ``uniform``            -- random floor. AP = prevalence, recall@B = B/N, lift = 1 (analytic).
 - ``<dist>_<stego|cover>`` -- one localizer per score map in ``read_changes.SCORE_MAP_BUILDERS``
-  (texture_energy, laplacian_residual, local_variance, wavelet_energy, srm_residual), scored on the
+  (texture_energy, gradient_magnitude, laplacian_residual, local_variance, local_entropy,
+  wavelet_energy, srm_residual), scored on the
   stego image (the blind setting) and on the cover image (the cover-vs-stego ablation: if the two
   match, the map carries no embedding-specific signal).
 - ``oracle``             -- ceiling: true conseal selection channel (cover-derived change probability).
@@ -65,10 +66,14 @@ DEFAULTS = dict(
         "uniform",
         "texture_energy_stego",
         "texture_energy_cover",
+        "gradient_magnitude_stego",
+        "gradient_magnitude_cover",
         "laplacian_residual_stego",
         "laplacian_residual_cover",
         "local_variance_stego",
         "local_variance_cover",
+        "local_entropy_stego",
+        "local_entropy_cover",
         "wavelet_energy_stego",
         "wavelet_energy_cover",
         "srm_residual_stego",

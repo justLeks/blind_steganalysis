@@ -66,9 +66,9 @@ class TestParallelBenchmarkBitExact(unittest.TestCase):
                 seq_text = (out_seq / name).read_text(encoding="utf-8")
                 par_text = (out_par / name).read_text(encoding="utf-8")
                 self.assertEqual(seq_text, par_text, f"{name} differs between workers=1 and workers=2")
-            # Sanity: the run actually produced rows for all 12 localizers x 3 images.
+            # Sanity: the run actually produced rows for all 16 default localizers x 3 images.
             n_rows = len((out_seq / "per_image.csv").read_text(encoding="utf-8").strip().splitlines()) - 1
-            self.assertEqual(n_rows, 12 * 3)
+            self.assertEqual(n_rows, 16 * 3)
 
 
 if __name__ == "__main__":

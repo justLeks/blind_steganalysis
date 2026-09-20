@@ -53,8 +53,10 @@ GRAY_STYLES: dict[str, dict] = {
     "uniform": dict(color="0.45", linestyle=":", marker="", linewidth=1.4),
     "oracle": dict(color="0.0", linestyle="-", marker="", linewidth=2.2),
     "texture_energy": dict(color="0.0", linestyle="--", marker="o"),
+    "gradient_magnitude": dict(color="0.5", linestyle="--", marker="x"),
     "laplacian_residual": dict(color="0.3", linestyle="-.", marker="s"),
     "local_variance": dict(color="0.0", linestyle="-", marker="^"),
+    "local_entropy": dict(color="0.6", linestyle="-.", marker="+"),
     "wavelet_energy": dict(color="0.35", linestyle="--", marker="D"),
     "srm_residual": dict(color="0.55", linestyle="-", marker="v"),
 }
@@ -62,12 +64,15 @@ PRETTY = {
     "uniform": "uniform (floor)",
     "oracle": "oracle (ceiling)",
     "texture_energy": "texture energy",
+    "gradient_magnitude": "gradient magnitude",
     "laplacian_residual": "Laplacian residual",
     "local_variance": "local variance",
+    "local_entropy": "local entropy",
     "wavelet_energy": "wavelet energy",
     "srm_residual": "SRM residual",
 }
-STEGO_MAPS = ["texture_energy", "laplacian_residual", "local_variance", "wavelet_energy", "srm_residual"]
+STEGO_MAPS = ["texture_energy", "gradient_magnitude", "laplacian_residual", "local_variance",
+              "local_entropy", "wavelet_energy", "srm_residual"]
 MARKER_SIZE = 4.0
 
 
