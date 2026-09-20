@@ -5,7 +5,8 @@ the best any selection-channel-aware method could do. It is the upper bracket (c
 estimator ladder; the random baseline is the lower bracket (floor).
 
 This reproduces the exact probability map that ``conseal`` used to draw the recorded carriers
-(``conseal.simulate._ternary.probability`` for HUGO, ``conseal.mipod.probability`` for MiPOD), so the
+(``conseal.simulate._ternary.probability`` over the adjusted costs for HUGO and S-UNIWARD,
+``conseal.mipod.probability`` for MiPOD), so the
 ceiling is exact rather than a cost proxy. Because the recorded carriers are a Bernoulli draw with these
 probabilities, the identity ``E[#changes] = sum(p_+1 + p_-1)`` provides a built-in correctness check
 (see :func:`expected_changes`).
@@ -20,7 +21,7 @@ import numpy as np
 from embedding import prepare_conseal_import
 
 
-SUPPORTED_METHODS = {"HUGO", "MIPOD"}
+SUPPORTED_METHODS = {"HUGO", "MIPOD", "SUNIWARD"}
 
 
 def change_probability_map(cover_u8: np.ndarray, method: str, alpha: float) -> np.ndarray:
@@ -42,6 +43,9 @@ def change_probability_map(cover_u8: np.ndarray, method: str, alpha: float) -> n
         warnings.simplefilter("ignore")  # MiPOD warns on flat-variance clipping; expected and harmless.
         if normalized == "HUGO":
             rhos = cl.hugo.compute_cost_adjusted(cover)  # (rho_p1, rho_m1) with simulator defaults
+            ps, _ = _ternary.probability(rhos=rhos, alpha=alpha, n=cover.size)  # type: ignore[arg-type, misc]
+        elif normalized == "SUNIWARD":
+            rhos = cl.suniward.compute_cost_adjusted(cover)  # (rho_p1, rho_m1) with simulator defaults
             ps, _ = _ternary.probability(rhos=rhos, alpha=alpha, n=cover.size)  # type: ignore[arg-type, misc]
         else:  # MIPOD
             ps, _ = cl.mipod.probability(cover, alpha)

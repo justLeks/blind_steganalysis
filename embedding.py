@@ -12,7 +12,7 @@ from PIL import Image
 
 
 IMAGE_EXTENSIONS = {".png", ".jpg", ".jpeg", ".tif", ".tiff", ".bmp"}
-SUPPORTED_METHODS = {"HUGO", "MIPOD"}
+SUPPORTED_METHODS = {"HUGO", "MIPOD", "SUNIWARD"}
 
 # Edit these defaults and then run: python3 embedding.py
 DEFAULT_SRC_DIR = Path("ALASKA_v2_TIFF_512_GrayScale_50")
@@ -104,6 +104,8 @@ def simulate_embedding(
         return cl.hugo.simulate_single_channel(x0=cover_image, alpha=alpha, seed=seed)
     if normalized_method == "MIPOD":
         return cl.mipod.simulate_single_channel(x0=cover_image, alpha=alpha, seed=seed)
+    if normalized_method == "SUNIWARD":
+        return cl.suniward.simulate_single_channel(x0=cover_image, alpha=alpha, seed=seed)
     raise ValueError(f"Unsupported method '{method}'. Supported methods: {sorted(SUPPORTED_METHODS)}")
 
 

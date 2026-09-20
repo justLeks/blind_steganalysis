@@ -44,7 +44,8 @@ random floor  →  hand-crafted score maps (this repo)  →  [SRM-learned → CN
 **No result is reported without three controls:**
 
 1. **Random floor** — uniform probing has `E[recall] = B/N` exactly; report **lift = recall / (B/N)**.
-2. **Oracle ceiling** — conseal's true selection channel (`selection_channel.py`), the best any
+2. **Oracle ceiling** — conseal's true selection channel (`selection_channel.py`; HUGO and S-UNIWARD via
+   their adjusted costs + `_ternary.probability`, MiPOD via `mipod.probability`), the best any
    localizer could do.
 3. **Cover-vs-stego ablation** — every map is scored on the stego image *and* on the cover. If the two
    match, the map carries no embedding-specific signal: it predicts the content-driven selection
