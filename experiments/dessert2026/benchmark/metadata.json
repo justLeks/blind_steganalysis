@@ -1,0 +1,96 @@
+{
+  "steganogram_root": "/Users/pavloyatsura/Documents/phd/blind_steganalysis/experiments/dessert2026/steganograms",
+  "cover_root": "/Users/pavloyatsura/Documents/phd/blind_steganalysis/ALASKA_v2_TIFF_512_GrayScale_10K",
+  "cover_list": "/Users/pavloyatsura/Documents/phd/blind_steganalysis/data/subsets/alaska10k_n1000_seed12345.txt",
+  "methods": [
+    "HUGO",
+    "MIPOD",
+    "SUNIWARD"
+  ],
+  "alphas": [
+    0.001,
+    0.0025,
+    0.005,
+    0.01,
+    0.02,
+    0.03,
+    0.05,
+    0.1,
+    0.2,
+    0.5
+  ],
+  "budgets": [
+    0.005,
+    0.01,
+    0.02,
+    0.05,
+    0.1,
+    0.2,
+    0.3,
+    0.4,
+    0.5
+  ],
+  "naurc_bmax": [
+    0.1,
+    0.5
+  ],
+  "localizers": [
+    "uniform",
+    "texture_energy_stego",
+    "texture_energy_cover",
+    "gradient_magnitude_stego",
+    "gradient_magnitude_cover",
+    "laplacian_residual_stego",
+    "laplacian_residual_cover",
+    "local_variance_stego",
+    "local_variance_cover",
+    "local_entropy_stego",
+    "local_entropy_cover",
+    "wavelet_energy_stego",
+    "wavelet_energy_cover",
+    "srm_residual_stego",
+    "srm_residual_cover",
+    "oracle"
+  ],
+  "score_map_params": {
+    "gradient_magnitude": {
+      "gamma": 1.0,
+      "floor": 1e-06
+    },
+    "laplacian_residual": {
+      "gamma": 1.0,
+      "floor": 1e-06
+    },
+    "local_entropy": {
+      "gamma": 1.0,
+      "floor": 1e-06,
+      "window": 9,
+      "bins": 32
+    },
+    "local_variance": {
+      "gamma": 1.0,
+      "floor": 1e-06,
+      "window": 9
+    },
+    "srm_residual": {
+      "gamma": 1.0,
+      "floor": 1e-06
+    },
+    "texture_energy": {
+      "gamma": 1.0,
+      "floor": 1e-06
+    },
+    "wavelet_energy": {
+      "gamma": 1.0,
+      "floor": 1e-06
+    }
+  },
+  "images_per_config": "all",
+  "bootstrap_resamples": 2000,
+  "seed": 12345,
+  "workers": 8,
+  "tie_break_rng": "per-record (sha256 of config_id|record_name mixed with seed)",
+  "n_raw_rows": 480000,
+  "n_summary_rows": 480,
+  "note": "uniform localizer reported as analytic expectation (AP=prevalence, recall=fraction)."
+}

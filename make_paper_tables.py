@@ -50,7 +50,7 @@ def table1(lk, alphas, out):
     write(rows, header, out)
 
 
-def table2(lk, probing_rows, alpha, labels, out):
+def table2(lk, probing_rows, alpha, labels, out, sampling_budgets=(0.01, 0.1, 0.5)):
     methods = methods_present(lk)
     rows = []
     for lab in labels:
@@ -65,6 +65,8 @@ def table2(lk, probing_rows, alpha, labels, out):
     samp = {(r["method"], float(r["alpha"]), round(float(r["probe_budget_fraction"]), 6)): r for r in probing_rows}
     for lab in labels:
         B = float(lab.replace("p", ".")) / 100.0
+        if not any(abs(B - sb) < 1e-12 for sb in sampling_budgets):
+            continue
         row = [f"{100 * B:g} (γ=1 sampling)"]
         for m in methods:
             r = samp.get((m, alpha, round(B, 6)))
@@ -117,6 +119,8 @@ def main(argv=None):
     p.add_argument("--root", type=Path, default=Path("experiments/dessert2026"))
     p.add_argument("--alpha", type=float, default=0.01)
     p.add_argument("--table3-alphas", type=float, nargs="+", default=[0.005, 0.01, 0.05])
+    p.add_argument("--sampling-budgets", type=float, nargs="+", default=[0.01, 0.1, 0.5],
+                   help="Budgets at which the γ=1 sampling rows are added to Table II.")
     args = p.parse_args(argv)
     summary = read_rows(args.root / "benchmark" / "summary.csv")
     lk = {(r["method"], float(r["alpha"]), r["localizer"]): r for r in summary}
@@ -126,7 +130,7 @@ def main(argv=None):
     paper = args.root / "paper"
     table1(lk, alphas, paper / "table1_carriers.csv")
     table2(lk, read_rows(args.root / "probing_texture_energy" / "probe_summary.csv"), args.alpha, labels,
-           paper / f"table2_budget_curve_alpha{tag(args.alpha)}.csv")
+           paper / f"table2_budget_curve_alpha{tag(args.alpha)}.csv", tuple(args.sampling_budgets))
     for a in args.table3_alphas:
         table3(lk, a, paper / f"table3_localizers_alpha{tag(a)}.csv")
     table4(read_rows(args.root / "paired_tests" / "paired_tests.csv"), args.alpha, methods_present(lk),

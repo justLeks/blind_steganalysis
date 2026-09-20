@@ -1,0 +1,25 @@
+{
+  "benchmark": "/Users/pavloyatsura/Documents/phd/blind_steganalysis/experiments/dessert2026/benchmark",
+  "target": "texture_energy_stego",
+  "baselines": [
+    "uniform",
+    "gradient_magnitude_stego",
+    "laplacian_residual_stego",
+    "local_variance_stego",
+    "local_entropy_stego",
+    "wavelet_energy_stego",
+    "srm_residual_stego"
+  ],
+  "metrics": [
+    "average_precision",
+    "recall_at_1",
+    "recall_at_5",
+    "recall_at_10",
+    "naurc_10"
+  ],
+  "test": "wilcoxon signed-rank, two-sided, zero_method=wilcox",
+  "correction": "holm within (method, alpha, metric)",
+  "bootstrap": 2000,
+  "seed": 0,
+  "n_rows": 1050
+}

@@ -1,0 +1,33 @@
+[probe_seed] 12345 (configured_fixed)
+[embed:skip] hugo_alpha0p001
+[embed:skip] hugo_alpha0p0025
+[embed:skip] hugo_alpha0p005
+[embed:skip] hugo_alpha0p01
+[embed:skip] hugo_alpha0p02
+[embed:skip] hugo_alpha0p03
+[embed:skip] hugo_alpha0p05
+[embed:skip] hugo_alpha0p1
+[embed:skip] hugo_alpha0p2
+[embed:skip] hugo_alpha0p5
+[embed:skip] mipod_alpha0p001
+[embed:skip] mipod_alpha0p0025
+[embed:skip] mipod_alpha0p005
+[embed:skip] mipod_alpha0p01
+[embed:skip] mipod_alpha0p02
+[embed:skip] mipod_alpha0p03
+[embed:skip] mipod_alpha0p05
+[embed:skip] mipod_alpha0p1
+[embed:skip] mipod_alpha0p2
+[embed:skip] mipod_alpha0p5
+[embed:skip] suniward_alpha0p001
+[embed:skip] suniward_alpha0p0025
+[embed:skip] suniward_alpha0p005
+[embed:skip] suniward_alpha0p01
+[embed:skip] suniward_alpha0p02
+[embed:skip] suniward_alpha0p03
+[embed:skip] suniward_alpha0p05
+[embed:skip] suniward_alpha0p1
+[embed:skip] suniward_alpha0p2
+[embed:skip] suniward_alpha0p5
+Wrote 270000 raw rows to /Users/pavloyatsura/Documents/phd/blind_steganalysis/experiments/dessert2026/probing_uniform/probe_raw.csv
+Wrote 270 summary rows to /Users/pavloyatsura/Documents/phd/blind_steganalysis/experiments/dessert2026/probing_uniform/probe_summary.csv

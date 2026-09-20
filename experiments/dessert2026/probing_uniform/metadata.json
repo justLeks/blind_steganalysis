@@ -1,0 +1,51 @@
+{
+  "cover_root": "/Users/pavloyatsura/Documents/phd/blind_steganalysis/ALASKA_v2_TIFF_512_GrayScale_10K",
+  "cover_list": "/Users/pavloyatsura/Documents/phd/blind_steganalysis/data/subsets/alaska10k_n1000_seed12345.txt",
+  "workers": 8,
+  "repeats": 10,
+  "experiment_root": "/Users/pavloyatsura/Documents/phd/blind_steganalysis/experiments/dessert2026/probing_uniform",
+  "steganogram_root": "/Users/pavloyatsura/Documents/phd/blind_steganalysis/experiments/dessert2026/steganograms",
+  "methods": [
+    "HUGO",
+    "MIPOD",
+    "SUNIWARD"
+  ],
+  "alphas": [
+    0.001,
+    0.0025,
+    0.005,
+    0.01,
+    0.02,
+    0.03,
+    0.05,
+    0.1,
+    0.2,
+    0.5
+  ],
+  "embed_seed": 12345,
+  "configured_probe_seed": 12345,
+  "run_probe_seed": 12345,
+  "probe_seed_mode": "configured_fixed",
+  "probe_budget_fractions": [
+    0.005,
+    0.01,
+    0.02,
+    0.05,
+    0.1,
+    0.2,
+    0.3,
+    0.4,
+    0.5
+  ],
+  "probe_distribution": "uniform",
+  "probe_distribution_params": {
+    "gamma": 1.0,
+    "floor": 1e-06
+  },
+  "resolved_distribution_params": null,
+  "probe_image_source": "stego",
+  "raw_csv": "/Users/pavloyatsura/Documents/phd/blind_steganalysis/experiments/dessert2026/probing_uniform/probe_raw.csv",
+  "summary_csv": "/Users/pavloyatsura/Documents/phd/blind_steganalysis/experiments/dessert2026/probing_uniform/probe_summary.csv",
+  "raw_rows": 270000,
+  "summary_rows": 270
+}
