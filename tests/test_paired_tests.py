@@ -32,7 +32,7 @@ def _table(n=60, shift=0.05, seed=0):
 
 class TestPaired(unittest.TestCase):
     def test_holm(self):
-        np.testing.assert_allclose(holm_adjust([0.01, 0.04, 0.03]), [0.03, 0.04, 0.06])
+        np.testing.assert_allclose(holm_adjust([0.01, 0.04, 0.03]), [0.03, 0.06, 0.06])  # step-down, monotone
 
     def test_wilcoxon_edge_cases(self):
         self.assertEqual(wilcoxon_p(np.zeros(10)), (1.0, 10))
