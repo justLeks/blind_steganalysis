@@ -84,6 +84,18 @@ def iter_image_files(src_dir: Path) -> Iterable[Path]:
             yield path
 
 
+def read_cover_list(path: str | Path) -> set[str]:
+    """File names (one per line, '#' comments allowed) restricting a run to a cover subset."""
+    names = set()
+    for line in Path(path).read_text(encoding="utf-8").splitlines():
+        line = line.strip()
+        if line and not line.startswith("#"):
+            names.add(line)
+    if not names:
+        raise ValueError(f"Cover list is empty: {path}")
+    return names
+
+
 def derive_image_seed(base_seed: int, relative_path: Path) -> int:
     digest = hashlib.sha256(relative_path.as_posix().encode("utf-8")).digest()
     offset = int.from_bytes(digest[:8], "big")
