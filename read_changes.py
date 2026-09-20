@@ -37,6 +37,15 @@ def iter_record_paths(input_path: str | Path) -> list[Path]:
     return [path.resolve() for path in record_paths]
 
 
+def filter_record_paths_by_cover_list(record_paths: list[Path], cover_list: set[str] | None) -> list[Path]:
+    """Keep the change records whose cover file name (stem + any extension) is in ``cover_list``."""
+    if cover_list is None:
+        return list(record_paths)
+    stems = {Path(name).stem for name in cover_list}
+    suffix = "_changes.npz"
+    return [p for p in record_paths if p.name.endswith(suffix) and p.name[: -len(suffix)] in stems]
+
+
 def load_change_record(record_path: str | Path) -> dict:
     record_path = Path(record_path).expanduser().resolve()
     with np.load(record_path, allow_pickle=False) as data:

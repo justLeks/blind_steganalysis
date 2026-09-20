@@ -9,11 +9,12 @@ from pathlib import Path
 
 import numpy as np
 
-from embedding import embed_and_log, to_u8_array
+from embedding import embed_and_log, read_cover_list, to_u8_array
 from read_changes import (
     IMAGE_ADAPTIVE_PROBE_DISTRIBUTIONS,
     SUPPORTED_PROBE_DISTRIBUTIONS,
     build_sampling_probabilities,
+    filter_record_paths_by_cover_list,
     iter_record_paths,
     load_change_record,
     resolve_probe_image_path,
@@ -25,6 +26,10 @@ from read_changes import (
 # (see build_parser). Committed defaults reproduce the published experiment in
 # experiments/probing_only (texture_energy, fixed seed 12345).
 COVER_ROOT = Path("ALASKA_v2_TIFF_512_GrayScale_50")
+# Optional cover-list file (one file name per line) restricting the run to a subset of COVER_ROOT.
+COVER_LIST: Path | None = None
+# Parallel worker processes for embedding (probing parallelism arrives with --repeats).
+WORKERS = 1
 EXPERIMENT_ROOT = Path("experiments/probing_only")
 STEGANOGRAM_ROOT = Path("experiments/probing_only/steganograms")
 
@@ -69,7 +74,14 @@ def derive_seed(base_seed: int, *parts: object) -> int:
     return (int(base_seed) + offset) % (2**32)
 
 
+def resolve_cover_list() -> set[str] | None:
+    return read_cover_list(COVER_LIST) if COVER_LIST else None
+
+
 def cover_image_count() -> int:
+    cover_list = resolve_cover_list()
+    if cover_list is not None:
+        return len(cover_list)
     return sum(1 for path in COVER_ROOT.iterdir() if path.is_file() and path.suffix.lower() in {".tif", ".tiff"})
 
 
@@ -102,6 +114,8 @@ def ensure_steganograms(method: str, alpha: float, expected_count: int) -> Path:
         method=method,
         alpha=alpha,
         seed=EMBED_SEED,
+        workers=WORKERS,
+        cover_list=resolve_cover_list(),
     )
     return output_dir
 
@@ -280,7 +294,7 @@ def run_experiment(run_probe_seed: int) -> tuple[list[dict], list[dict]]:
     for method in METHODS:
         for alpha in ALPHAS:
             config_dir = ensure_steganograms(method, alpha, expected_count)
-            record_paths = iter_record_paths(config_dir)
+            record_paths = filter_record_paths_by_cover_list(iter_record_paths(config_dir), resolve_cover_list())
             if LIMIT:
                 record_paths = record_paths[:LIMIT]
             for record_path in record_paths:
@@ -298,6 +312,9 @@ def build_parser() -> argparse.ArgumentParser:
         description="Budgeted carrier-pixel probing sweep. Defaults reproduce experiments/probing_only."
     )
     p.add_argument("--cover-root", type=Path, default=COVER_ROOT)
+    p.add_argument("--cover-list", type=Path, default=COVER_LIST,
+                   help="Restrict the run to the cover file names listed in this file (one per line).")
+    p.add_argument("--workers", type=int, default=WORKERS, help="Parallel worker processes (default 1).")
     p.add_argument("--experiment-root", type=Path, default=EXPERIMENT_ROOT)
     p.add_argument("--steganogram-root", type=Path, default=STEGANOGRAM_ROOT)
     p.add_argument("--methods", nargs="+", default=METHODS)
@@ -315,10 +332,12 @@ def build_parser() -> argparse.ArgumentParser:
 
 def apply_args(args: argparse.Namespace) -> None:
     """Override the module-level config from parsed CLI args (keeps the importable defaults intact)."""
-    global COVER_ROOT, EXPERIMENT_ROOT, STEGANOGRAM_ROOT, METHODS, ALPHAS
+    global COVER_ROOT, COVER_LIST, WORKERS, EXPERIMENT_ROOT, STEGANOGRAM_ROOT, METHODS, ALPHAS
     global PROBE_BUDGET_FRACTIONS, PROBE_DISTRIBUTION, PROBE_IMAGE_SOURCE, PROBE_SEED, LIMIT
     global RAW_CSV, SUMMARY_CSV, METADATA_JSON
     COVER_ROOT = args.cover_root
+    COVER_LIST = args.cover_list
+    WORKERS = args.workers
     EXPERIMENT_ROOT = args.experiment_root
     STEGANOGRAM_ROOT = args.steganogram_root
     METHODS = args.methods
@@ -345,6 +364,8 @@ def main(argv: list[str] | None = None) -> None:
         json.dumps(
             {
                 "cover_root": str(COVER_ROOT.resolve()),
+                "cover_list": str(COVER_LIST.resolve()) if COVER_LIST else None,
+                "workers": WORKERS,
                 "experiment_root": str(EXPERIMENT_ROOT.resolve()),
                 "steganogram_root": str(STEGANOGRAM_ROOT.resolve()),
                 "methods": METHODS,

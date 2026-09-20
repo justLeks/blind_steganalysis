@@ -242,6 +242,7 @@ def embed_and_log(
     alpha: float = 0.4,
     seed: int = 12345,
     workers: int = 1,
+    cover_list: set[str] | None = None,
 ) -> list[dict]:
     src_dir = Path(src_dir).expanduser().resolve()
     dst_dir = Path(dst_dir).expanduser().resolve()
@@ -255,6 +256,12 @@ def embed_and_log(
         raise ValueError(f"workers must be >= 1, got {workers}.")
 
     image_paths = list(iter_image_files(src_dir))
+    if cover_list is not None:
+        by_name = {path.name: path for path in image_paths}
+        missing = sorted(name for name in cover_list if name not in by_name)
+        if missing:
+            raise FileNotFoundError(f"{len(missing)} listed cover(s) not found under {src_dir}: {missing[:5]}")
+        image_paths = [by_name[name] for name in sorted(cover_list)]
     if not image_paths:
         raise FileNotFoundError(
             f"No supported image files were found in {src_dir}. Supported extensions: {sorted(IMAGE_EXTENSIONS)}"
@@ -301,6 +308,12 @@ def build_parser() -> argparse.ArgumentParser:
         help="Parallel worker processes for embedding (default 1 = sequential). "
         "Per-image seeds are path-derived, so results are identical for any worker count.",
     )
+    parser.add_argument(
+        "--cover-list",
+        type=Path,
+        default=None,
+        help="Restrict embedding to the cover file names listed in this file (one per line).",
+    )
     return parser
 
 
@@ -326,6 +339,7 @@ if __name__ == "__main__":
             alpha=args.alpha,
             seed=args.seed,
             workers=args.workers,
+            cover_list=read_cover_list(args.cover_list) if args.cover_list else None,
         )
         target_dir = args.dst_dir
 

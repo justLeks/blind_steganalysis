@@ -42,10 +42,11 @@ from pathlib import Path
 
 import numpy as np
 
-from embedding import to_u8_array
+from embedding import read_cover_list, to_u8_array
 from read_changes import (
     IMAGE_ADAPTIVE_PROBE_DISTRIBUTIONS,
     build_adaptive_probabilities,
+    filter_record_paths_by_cover_list,
     iter_record_paths,
     load_change_record,
     resolve_score_map_params,
@@ -187,6 +188,7 @@ def evaluate(args) -> None:
         raise ValueError(f"workers must be >= 1, got {args.workers}.")
 
     budget_pct = [f"{int(round(100 * b))}" for b in args.budgets]
+    cover_list = read_cover_list(args.cover_list) if args.cover_list else None
 
     tasks: list[tuple] = []
     for method in args.methods:
@@ -196,7 +198,7 @@ def evaluate(args) -> None:
             if not cdir.exists():
                 print(f"[skip] {cfg}: no steganograms at {cdir}")
                 continue
-            records = iter_record_paths(cdir)
+            records = filter_record_paths_by_cover_list(iter_record_paths(cdir), cover_list)
             if args.limit:
                 records = records[: args.limit]
             print(f"[run] {cfg}: {len(records)} images")
@@ -227,6 +229,7 @@ def evaluate(args) -> None:
             {
                 "steganogram_root": str(args.steganogram_root.resolve()),
                 "cover_root": str(args.cover_root.resolve()),
+                "cover_list": str(args.cover_list.resolve()) if args.cover_list else None,
                 "methods": args.methods,
                 "alphas": args.alphas,
                 "budgets": args.budgets,
@@ -304,6 +307,8 @@ def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     p.add_argument("--steganogram-root", type=Path, default=DEFAULTS["steganogram_root"])
     p.add_argument("--cover-root", type=Path, default=DEFAULTS["cover_root"])
+    p.add_argument("--cover-list", type=Path, default=None,
+                   help="Restrict the sweep to the cover file names listed in this file (one per line).")
     p.add_argument("--output-root", type=Path, default=DEFAULTS["output_root"])
     p.add_argument("--methods", nargs="+", default=DEFAULTS["methods"])
     p.add_argument("--alphas", nargs="+", type=float, default=DEFAULTS["alphas"])
