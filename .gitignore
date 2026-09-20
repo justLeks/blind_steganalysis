@@ -21,3 +21,8 @@ experiments/**/steganograms/
 # Summaries/metadata/figures of those runs ARE tracked.
 experiments/probing_10k_*/probe_raw.csv
 experiments/distribution_benchmark_10k_*/per_image.csv
+
+# DESSERT-2026 campaign raw per-image tables (re-derivable, > 100 MB) and the smoke run
+experiments/dessert2026*/benchmark/per_image.csv
+experiments/dessert2026*/probing_*/probe_raw.csv
+experiments/dessert2026_smoke/
