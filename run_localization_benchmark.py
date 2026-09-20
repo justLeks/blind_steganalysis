@@ -13,8 +13,10 @@ Localizers compared, per (method, alpha), over the recorded carrier masks:
 Legacy names ``texture_stego`` / ``texture_cover`` are accepted as aliases and normalised to
 ``texture_energy_stego`` / ``texture_energy_cover``.
 
-Metrics per image: Average Precision (primary), ROC-AUC (secondary), and deterministic top-B
-recall/lift at each budget fraction. Aggregated per (method, alpha, localizer) with percentile
+Metrics per image: Average Precision (primary), ROC-AUC (secondary), deterministic top-B
+recall/lift/precision at each budget fraction, and the normalized area under the recall-budget
+curve nAURC(b_max) for each ``--naurc-bmax`` (uniform = b_max / 2). Budget columns are labelled
+by ``localization_metrics.budget_label`` (0.005 -> ``recall_at_0p5``, 0.1 -> ``recall_at_10``). Aggregated per (method, alpha, localizer) with percentile
 bootstrap CIs across images.
 
 Reproducibility: the recall/lift tie-break RNG is seeded per record (SHA-256 of config id + record
@@ -133,7 +135,7 @@ def _evaluate_record(task: tuple) -> list[dict]:
     Deterministic: the tie-break RNG is derived from (seed, config id, record name) only, so the
     output is identical for any worker count or record order.
     """
-    rp, cfg, method, alpha, localizers, budget_list, budget_pct, cover_root, cdir, base_seed = task
+    rp, cfg, method, alpha, localizers, budget_list, budget_pct, cover_root, cdir, base_seed, naurc_bmax = task
     budgets = np.asarray(budget_list, dtype=np.float64)
     rng = np.random.default_rng(derive_record_seed(base_seed, cfg, rp.name))
 
@@ -160,6 +162,8 @@ def _evaluate_record(task: tuple) -> list[dict]:
             roc = M.roc_auc(scores, labels)
             recalls = M.recall_at_budgets(scores, labels, budgets, rng)
         lifts = M.lift_at_budgets(recalls, budgets)
+        precisions = M.precision_at_budgets(recalls, budgets, n_pos=int(labels.sum()), total_pixels=total)
+        naurcs = {M.budget_label(bm): M.normalized_aurc(recalls, budgets, bm) for bm in naurc_bmax}
 
         row = {
             "config_id": cfg,
@@ -172,9 +176,12 @@ def _evaluate_record(task: tuple) -> list[dict]:
             "average_precision": ap,
             "roc_auc": roc,
         }
-        for pct, rec, lift in zip(budget_pct, recalls, lifts):
+        for pct, rec, lift, prec in zip(budget_pct, recalls, lifts, precisions):
             row[f"recall_at_{pct}"] = float(rec)
             row[f"lift_at_{pct}"] = float(lift)
+            row[f"precision_at_{pct}"] = float(prec)
+        for lab, value in naurcs.items():
+            row[f"naurc_{lab}"] = float(value)
         rows.append(row)
     return rows
 
@@ -187,7 +194,10 @@ def evaluate(args) -> None:
     if args.workers < 1:
         raise ValueError(f"workers must be >= 1, got {args.workers}.")
 
-    budget_pct = [f"{int(round(100 * b))}" for b in args.budgets]
+    budget_pct = [M.budget_label(b) for b in args.budgets]
+    for bm in args.naurc_bmax:
+        if not any(abs(bm - b) < 1e-12 for b in args.budgets):
+            raise ValueError(f"--naurc-bmax {bm} must be one of the budgets {args.budgets}")
     cover_list = read_cover_list(args.cover_list) if args.cover_list else None
 
     tasks: list[tuple] = []
@@ -204,7 +214,7 @@ def evaluate(args) -> None:
             print(f"[run] {cfg}: {len(records)} images")
             tasks.extend(
                 (rp, cfg, method, alpha, args.localizers, args.budgets, budget_pct,
-                 args.cover_root, cdir, args.seed)
+                 args.cover_root, cdir, args.seed, args.naurc_bmax)
                 for rp in records
             )
 
@@ -219,7 +229,7 @@ def evaluate(args) -> None:
             per_record_rows = list(pool.imap(_evaluate_record, tasks, chunksize=4))
 
     raw_rows: list[dict] = [row for rows in per_record_rows for row in rows]
-    summary_rows = summarize(raw_rows, budget_pct, args.bootstrap, args.seed)
+    summary_rows = summarize(raw_rows, budget_pct, args.bootstrap, args.seed, args.naurc_bmax)
 
     args.output_root.mkdir(parents=True, exist_ok=True)
     write_csv(args.output_root / "per_image.csv", raw_rows)
@@ -233,6 +243,7 @@ def evaluate(args) -> None:
                 "methods": args.methods,
                 "alphas": args.alphas,
                 "budgets": args.budgets,
+                "naurc_bmax": args.naurc_bmax,
                 "localizers": args.localizers,
                 "score_map_params": {
                     dist: resolve_score_map_params(dist, SCORE_PARAMS.get(dist))
@@ -260,7 +271,7 @@ def evaluate(args) -> None:
     print(f"\nWrote {len(raw_rows)} per-image rows and {len(summary_rows)} summary rows to {args.output_root.resolve()}")
 
 
-def summarize(raw_rows, budget_pct, bootstrap, seed):
+def summarize(raw_rows, budget_pct, bootstrap, seed, naurc_bmax=()):
     groups: dict[tuple, list[dict]] = {}
     for row in raw_rows:
         groups.setdefault((row["method"], row["alpha"], row["localizer"]), []).append(row)
@@ -289,6 +300,16 @@ def summarize(raw_rows, budget_pct, bootstrap, seed):
             rec[f"recall_at_{pct}_ci_lo"] = r_lo
             rec[f"recall_at_{pct}_ci_hi"] = r_hi
             rec[f"mean_lift_at_{pct}"] = float(np.nanmean(col(f"lift_at_{pct}")))
+            q_mean, q_lo, q_hi = M.bootstrap_ci(col(f"precision_at_{pct}"), bootstrap, seed=seed)
+            rec[f"mean_precision_at_{pct}"] = q_mean
+            rec[f"precision_at_{pct}_ci_lo"] = q_lo
+            rec[f"precision_at_{pct}_ci_hi"] = q_hi
+        for bm in naurc_bmax:
+            lab = M.budget_label(bm)
+            a_mean, a_lo, a_hi = M.bootstrap_ci(col(f"naurc_{lab}"), bootstrap, seed=seed)
+            rec[f"mean_naurc_{lab}"] = a_mean
+            rec[f"naurc_{lab}_ci_lo"] = a_lo
+            rec[f"naurc_{lab}_ci_hi"] = a_hi
         out.append(rec)
     return out
 
@@ -313,6 +334,8 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--methods", nargs="+", default=DEFAULTS["methods"])
     p.add_argument("--alphas", nargs="+", type=float, default=DEFAULTS["alphas"])
     p.add_argument("--budgets", nargs="+", type=float, default=DEFAULTS["budgets"])
+    p.add_argument("--naurc-bmax", nargs="+", type=float, default=[0.1, 0.5],
+                   help="Upper limits of the normalized area under the recall-budget curve (must be budgets).")
     p.add_argument("--localizers", nargs="+", default=DEFAULTS["localizers"])
     p.add_argument("--limit", type=int, default=0, help="Max images per config (0 = all).")
     p.add_argument("--bootstrap", type=int, default=2000, help="Bootstrap resamples for CIs.")
