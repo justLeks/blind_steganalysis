@@ -119,6 +119,36 @@ def lift_at_budgets(recalls: np.ndarray, fractions: np.ndarray) -> np.ndarray:
     return np.asarray(recalls, dtype=np.float64) / np.maximum(fractions, 1e-12)
 
 
+def budget_label(fraction: float) -> str:
+    """Column label for a budget fraction: 0.005 -> '0p5', 0.01 -> '1', 0.1 -> '10'."""
+    return ("%g" % (100.0 * float(fraction))).replace(".", "p")
+
+
+def precision_at_budgets(recalls, fractions, n_pos: int, total_pixels: int) -> np.ndarray:
+    """precision@B = |P_B ∩ C| / b with b = budget_pixels(total, B); derived from recall."""
+    fractions = np.asarray(fractions, dtype=np.float64)
+    b = np.array([budget_pixels(total_pixels, float(f)) for f in fractions], dtype=np.float64)
+    return np.asarray(recalls, dtype=np.float64) * float(n_pos) / b
+
+
+def normalized_aurc(recalls, fractions, b_max: float) -> float:
+    """(1 / b_max) * ∫_0^{b_max} R(B) dB, trapezoid on the budget grid with (0, 0) prepended.
+
+    Uniform sampling (R(B) = B) gives b_max / 2; a perfect localizer approaches 1.
+    ``b_max`` must be one of ``fractions`` so the integral ends on a measured point.
+    """
+    fractions = np.asarray(fractions, dtype=np.float64)
+    recalls = np.asarray(recalls, dtype=np.float64)
+    order = np.argsort(fractions)
+    f, r = fractions[order], recalls[order]
+    keep = f <= b_max + 1e-12
+    if not np.any(keep) or abs(f[keep][-1] - b_max) > 1e-9:
+        raise ValueError(f"b_max={b_max} must be one of the budget fractions {f.tolist()}")
+    x = np.r_[0.0, f[keep]]
+    y = np.r_[0.0, r[keep]]
+    return float(np.trapezoid(y, x) / b_max)
+
+
 def bootstrap_ci(
     values: np.ndarray,
     n_boot: int = 2000,
@@ -159,6 +189,9 @@ def _self_test() -> None:
     assert abs(recalls[0] - 0.1) < 0.02 and abs(recalls[1] - 0.5) < 0.02, recalls
     # AP of random scores ~ prevalence (0.05)
     assert abs(average_precision(scores, labels) - 0.05) < 0.01
+    f = np.array([0.01, 0.05, 0.1])
+    assert abs(normalized_aurc(f, f, 0.1) - 0.05) < 1e-12
+    assert budget_label(0.005) == "0p5" and budget_label(0.2) == "20"
     print("localization_metrics self-test OK")
 
 
