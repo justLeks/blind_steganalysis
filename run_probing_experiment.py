@@ -4,6 +4,7 @@ import argparse
 import csv
 import hashlib
 import json
+import multiprocessing
 import secrets
 from pathlib import Path
 
@@ -28,8 +29,11 @@ from read_changes import (
 COVER_ROOT = Path("ALASKA_v2_TIFF_512_GrayScale_50")
 # Optional cover-list file (one file name per line) restricting the run to a subset of COVER_ROOT.
 COVER_LIST: Path | None = None
-# Parallel worker processes for embedding (probing parallelism arrives with --repeats).
+# Parallel worker processes for embedding and probing (spawn context; results are order-independent).
 WORKERS = 1
+# Repeated weighted draws per image for the stochastic (gamma-weighted) sampling view. 1 = the
+# published single-draw schema; K > 1 stores per-image mean/sd/min/max over the K draws.
+REPEATS = 1
 EXPERIMENT_ROOT = Path("experiments/probing_only")
 STEGANOGRAM_ROOT = Path("experiments/probing_only/steganograms")
 
@@ -145,93 +149,115 @@ def sample_unique_probe_order(total_pixels: int, max_budget: int, seed: int, pro
     return selected[np.argsort(keys[selected])].astype(np.int64, copy=False)
 
 
-def probe_record(record: dict, input_base: Path, max_budget: int, run_probe_seed: int) -> list[dict]:
+def probe_record(
+    record: dict, input_base: Path, max_budget: int, run_probe_seed: int, *,
+    distribution: str, distribution_params: dict, image_source: str, cover_root: Path,
+    budget_fractions: list[float], repeats: int = 1,
+) -> list[dict]:
+    """Probe one change record; explicit configuration so spawned workers never read module globals.
+
+    ``repeats`` == 1 reproduces the published row schema and values bit-exactly. For ``repeats`` > 1
+    the per-budget hit counts are averaged over K independent draws (draw 0 is the K == 1 draw) and
+    the row gains ``repeats``, ``sd_/min_/max_carrier_recall`` and ``sd_guessed_carrier_pixels``.
+    """
+    if repeats < 1:
+        raise ValueError(f"repeats must be >= 1, got {repeats}.")
     image_shape = tuple(record["image_shape"])
     total_pixels = image_shape[0] * image_shape[1]
     changed_lookup = np.zeros(total_pixels, dtype=bool)
     changed_lookup[record["changed_flat_indices"]] = True
 
     sampling_image = None
-    probabilities = None
-    if PROBE_DISTRIBUTION in IMAGE_ADAPTIVE_PROBE_DISTRIBUTIONS:
-        sampling_image_path = resolve_probe_image_path(
-            record=record,
-            input_base=input_base,
-            image_source=PROBE_IMAGE_SOURCE,
-            cover_root=COVER_ROOT,
-        )
-        sampling_image = to_u8_array(sampling_image_path)
-
+    if distribution in IMAGE_ADAPTIVE_PROBE_DISTRIBUTIONS:
+        sampling_image = to_u8_array(resolve_probe_image_path(
+            record=record, input_base=input_base, image_source=image_source, cover_root=cover_root))
     probabilities = build_sampling_probabilities(
-        image_shape=image_shape,
-        distribution=PROBE_DISTRIBUTION,
-        distribution_params=PROBE_DISTRIBUTION_PARAMS,
-        sampling_image=sampling_image,
-    )
-    probe_seed = derive_seed(
-        run_probe_seed,
-        record["method"],
-        record["alpha"],
-        record["record_path"].name,
-        PROBE_DISTRIBUTION,
-    )
-    probe_order = sample_unique_probe_order(total_pixels, max_budget, probe_seed, probabilities)
+        image_shape=image_shape, distribution=distribution,
+        distribution_params=distribution_params, sampling_image=sampling_image)
 
+    base_parts = (record["method"], record["alpha"], record["record_path"].name, distribution)
+    seeds = [derive_seed(run_probe_seed, *base_parts)] + [
+        derive_seed(run_probe_seed, *base_parts, f"repeat{k}") for k in range(1, repeats)]
+    budgets = [budget_pixels(total_pixels, f) for f in budget_fractions]
+    hits = np.zeros((repeats, len(budgets)), dtype=np.int64)
+    unique_first = np.zeros(len(budgets), dtype=np.int64)
+    for k, seed in enumerate(seeds):
+        order = sample_unique_probe_order(total_pixels, max_budget, seed, probabilities)
+        for j, b in enumerate(budgets):
+            positions = order[:b]
+            hits[k, j] = int(np.count_nonzero(changed_lookup[positions]))
+            if k == 0:
+                unique_first[j] = int(np.unique(positions).size)
+
+    carrier_pixels = int(record["used_pixels"])
     rows: list[dict] = []
     previous_budget = 0
-    previous_guessed = 0
-    carrier_pixels = int(record["used_pixels"])
-
-    for fraction in PROBE_BUDGET_FRACTIONS:
-        current_budget = budget_pixels(total_pixels, fraction)
-        current_positions = probe_order[:current_budget]
-        guessed_carrier_pixels = int(np.count_nonzero(changed_lookup[current_positions]))
-
-        incremental_budget = current_budget - previous_budget
-        incremental_guessed = guessed_carrier_pixels - previous_guessed
-
-        rows.append(
-            {
-                "config_id": config_id(record["method"], record["alpha"]),
-                "record_name": record["record_path"].name,
-                "record_path": str(record["record_path"]),
-                "cover_relative_path": record["cover_relative_path"],
-                "stego_relative_path": record["stego_relative_path"],
-                "method": record["method"],
-                "alpha": float(record["alpha"]),
-                "record_seed": int(record["seed"]),
-                "probe_seed": int(probe_seed),
-                "probe_distribution": PROBE_DISTRIBUTION,
-                "probe_image_source": (
-                    PROBE_IMAGE_SOURCE
-                    if PROBE_DISTRIBUTION in IMAGE_ADAPTIVE_PROBE_DISTRIBUTIONS
-                    else ""
-                ),
-                "image_height": int(image_shape[0]),
-                "image_width": int(image_shape[1]),
-                "total_pixels": int(total_pixels),
-                "carrier_pixels": carrier_pixels,
-                "used_pixels": carrier_pixels,
-                "used_pixel_fraction": float(record["used_pixel_fraction"]),
-                "used_pixel_percentage": float(record["used_pixel_percentage"]),
-                "probe_budget_fraction": float(fraction),
-                "probe_budget_percentage": float(100.0 * fraction),
-                "probe_budget_pixels": int(current_budget),
-                "unique_probed_pixels": int(np.unique(current_positions).size),
-                "guessed_carrier_pixels": guessed_carrier_pixels,
-                "precision_hit_rate": guessed_carrier_pixels / current_budget if current_budget else 0.0,
-                "carrier_recall": guessed_carrier_pixels / carrier_pixels if carrier_pixels else 0.0,
-                "incremental_probe_pixels": int(incremental_budget),
-                "incremental_guessed_pixels": int(incremental_guessed),
-                "incremental_precision_hit_rate": incremental_guessed / incremental_budget if incremental_budget else 0.0,
-            }
-        )
-
-        previous_budget = current_budget
-        previous_guessed = guessed_carrier_pixels
-
+    previous_hits = np.zeros(repeats, dtype=np.float64)
+    for j, (fraction, b) in enumerate(zip(budget_fractions, budgets)):
+        h = hits[:, j].astype(np.float64)
+        inc_b = b - previous_budget
+        inc_h = h - previous_hits
+        recall = h / carrier_pixels if carrier_pixels else np.zeros_like(h)
+        row = {
+            "config_id": config_id(record["method"], record["alpha"]),
+            "record_name": record["record_path"].name,
+            "record_path": str(record["record_path"]),
+            "cover_relative_path": record["cover_relative_path"],
+            "stego_relative_path": record["stego_relative_path"],
+            "method": record["method"],
+            "alpha": float(record["alpha"]),
+            "record_seed": int(record["seed"]),
+            "probe_seed": int(seeds[0]),
+            "probe_distribution": distribution,
+            "probe_image_source": image_source if distribution in IMAGE_ADAPTIVE_PROBE_DISTRIBUTIONS else "",
+            "image_height": int(image_shape[0]),
+            "image_width": int(image_shape[1]),
+            "total_pixels": int(total_pixels),
+            "carrier_pixels": carrier_pixels,
+            "used_pixels": carrier_pixels,
+            "used_pixel_fraction": float(record["used_pixel_fraction"]),
+            "used_pixel_percentage": float(record["used_pixel_percentage"]),
+            "probe_budget_fraction": float(fraction),
+            "probe_budget_percentage": float(100.0 * fraction),
+            "probe_budget_pixels": int(b),
+            "unique_probed_pixels": int(unique_first[j]),
+            "guessed_carrier_pixels": int(h[0]) if repeats == 1 else float(h.mean()),
+            "precision_hit_rate": float(h.mean() / b) if b else 0.0,
+            "carrier_recall": float(recall.mean()),
+            "incremental_probe_pixels": int(inc_b),
+            "incremental_guessed_pixels": int(inc_h[0]) if repeats == 1 else float(inc_h.mean()),
+            "incremental_precision_hit_rate": float(inc_h.mean() / inc_b) if inc_b else 0.0,
+        }
+        if repeats > 1:
+            row.update({
+                "repeats": repeats,
+                "sd_carrier_recall": float(recall.std(ddof=1)),
+                "min_carrier_recall": float(recall.min()),
+                "max_carrier_recall": float(recall.max()),
+                "sd_guessed_carrier_pixels": float(h.std(ddof=1)),
+            })
+        rows.append(row)
+        previous_budget, previous_hits = b, h
     return rows
 
+
+def _probe_task(task: tuple) -> list[dict]:
+    """(record_path, input_base, max_budget, run_probe_seed, cfg) -> rows. Picklable for spawn workers."""
+    record_path, input_base, max_budget, run_probe_seed, cfg = task
+    record = load_change_record(record_path)
+    return probe_record(record, input_base, max_budget, run_probe_seed, **cfg)
+
+
+def run_tasks(tasks: list[tuple], workers: int) -> list[list[dict]]:
+    if workers < 1:
+        raise ValueError(f"workers must be >= 1, got {workers}.")
+    if workers == 1:
+        return [_probe_task(t) for t in tasks]
+    # "spawn" gives identical worker behaviour on macOS/Linux; imap preserves input order and the
+    # per-record seeds make every row independent of worker count.
+    context = multiprocessing.get_context("spawn")
+    with context.Pool(processes=workers) as pool:
+        return list(pool.imap(_probe_task, tasks, chunksize=4))
 
 def write_csv(path: Path, rows: list[dict]) -> None:
     if not rows:
@@ -258,8 +284,7 @@ def summarize(rows: list[dict]) -> list[dict]:
         def total(key: str) -> int:
             return int(sum(int(row[key]) for row in group_rows))
 
-        summary_rows.append(
-            {
+        summary_row = {
                 "config_id": config_id(method, alpha),
                 "method": method,
                 "alpha": float(alpha),
@@ -280,8 +305,11 @@ def summarize(rows: list[dict]) -> list[dict]:
                 "mean_incremental_probe_pixels": mean("incremental_probe_pixels"),
                 "mean_incremental_guessed_pixels": mean("incremental_guessed_pixels"),
                 "mean_incremental_precision_hit_rate": mean("incremental_precision_hit_rate"),
-            }
-        )
+        }
+        if "sd_carrier_recall" in group_rows[0]:
+            summary_row["repeats"] = int(group_rows[0]["repeats"])
+            summary_row["mean_sd_carrier_recall"] = mean("sd_carrier_recall")
+        summary_rows.append(summary_row)
     return summary_rows
 
 
@@ -289,23 +317,23 @@ def run_experiment(run_probe_seed: int) -> tuple[list[dict], list[dict]]:
     expected_count = cover_image_count()
     if expected_count <= 0:
         raise FileNotFoundError(f"No cover TIFF images found in {COVER_ROOT.resolve()}")
-
-    raw_rows: list[dict] = []
+    cover_list = resolve_cover_list()
+    cfg = dict(distribution=PROBE_DISTRIBUTION, distribution_params=PROBE_DISTRIBUTION_PARAMS,
+               image_source=PROBE_IMAGE_SOURCE, cover_root=COVER_ROOT,
+               budget_fractions=PROBE_BUDGET_FRACTIONS, repeats=REPEATS)
+    tasks: list[tuple] = []
     for method in METHODS:
         for alpha in ALPHAS:
             config_dir = ensure_steganograms(method, alpha, expected_count)
-            record_paths = filter_record_paths_by_cover_list(iter_record_paths(config_dir), resolve_cover_list())
+            record_paths = filter_record_paths_by_cover_list(iter_record_paths(config_dir), cover_list)
             if LIMIT:
                 record_paths = record_paths[:LIMIT]
             for record_path in record_paths:
-                record = load_change_record(record_path)
-                total_pixels = record["image_shape"][0] * record["image_shape"][1]
-                max_budget = budget_pixels(total_pixels, max(PROBE_BUDGET_FRACTIONS))
-                raw_rows.extend(probe_record(record, config_dir, max_budget, run_probe_seed))
-
-    summary_rows = summarize(raw_rows)
-    return raw_rows, summary_rows
-
+                shape = load_change_record(record_path)["image_shape"]
+                max_budget = budget_pixels(shape[0] * shape[1], max(PROBE_BUDGET_FRACTIONS))
+                tasks.append((record_path, config_dir, max_budget, run_probe_seed, cfg))
+    raw_rows = [row for rows in run_tasks(tasks, WORKERS) for row in rows]
+    return raw_rows, summarize(raw_rows)
 
 def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(
@@ -315,6 +343,8 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--cover-list", type=Path, default=COVER_LIST,
                    help="Restrict the run to the cover file names listed in this file (one per line).")
     p.add_argument("--workers", type=int, default=WORKERS, help="Parallel worker processes (default 1).")
+    p.add_argument("--repeats", type=int, default=REPEATS,
+                   help="Weighted draws per image (default 1 = published schema; K > 1 stores per-image aggregates).")
     p.add_argument("--experiment-root", type=Path, default=EXPERIMENT_ROOT)
     p.add_argument("--steganogram-root", type=Path, default=STEGANOGRAM_ROOT)
     p.add_argument("--methods", nargs="+", default=METHODS)
@@ -332,12 +362,13 @@ def build_parser() -> argparse.ArgumentParser:
 
 def apply_args(args: argparse.Namespace) -> None:
     """Override the module-level config from parsed CLI args (keeps the importable defaults intact)."""
-    global COVER_ROOT, COVER_LIST, WORKERS, EXPERIMENT_ROOT, STEGANOGRAM_ROOT, METHODS, ALPHAS
+    global COVER_ROOT, COVER_LIST, WORKERS, REPEATS, EXPERIMENT_ROOT, STEGANOGRAM_ROOT, METHODS, ALPHAS
     global PROBE_BUDGET_FRACTIONS, PROBE_DISTRIBUTION, PROBE_IMAGE_SOURCE, PROBE_SEED, LIMIT
     global RAW_CSV, SUMMARY_CSV, METADATA_JSON
     COVER_ROOT = args.cover_root
     COVER_LIST = args.cover_list
     WORKERS = args.workers
+    REPEATS = args.repeats
     EXPERIMENT_ROOT = args.experiment_root
     STEGANOGRAM_ROOT = args.steganogram_root
     METHODS = args.methods
@@ -366,6 +397,7 @@ def main(argv: list[str] | None = None) -> None:
                 "cover_root": str(COVER_ROOT.resolve()),
                 "cover_list": str(COVER_LIST.resolve()) if COVER_LIST else None,
                 "workers": WORKERS,
+                "repeats": REPEATS,
                 "experiment_root": str(EXPERIMENT_ROOT.resolve()),
                 "steganogram_root": str(STEGANOGRAM_ROOT.resolve()),
                 "methods": METHODS,
