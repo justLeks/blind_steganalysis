@@ -131,6 +131,3 @@ reproducibility. Everything is answered from one n = 1000 campaign (seeded subse
 | Model training / experiment tracking | `engineering-skills:senior-ml-engineer` | M3 |
 | Codebase fan-out search; implementation design | `Explore` / `Plan` agents | each milestone start |
 | Pre-merge review | `code-review`, `engineering-skills:adversarial-reviewer` | each milestone end |
-
-encodes this project's conventions (data contract, metric set, the three mandatory controls, the ladder,
-reproducibility rules, conseal API pointers) so future sessions invoke it directly instead of re-deriving.
