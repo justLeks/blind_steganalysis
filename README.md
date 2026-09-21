@@ -15,6 +15,12 @@ can be scored against a known carrier mask.
 · [`experiments/distribution_comparison/FINDINGS.md`](experiments/distribution_comparison/FINDINGS.md)
 (Milestone 3a: score-map comparison).
 
+## Citing
+
+The DESSERT-2026 revision campaign (`experiments/dessert2026/`, tag `dessert2026-rev1`) is described in:
+P. Yatsura and D. Progonov, "Texture-guided budgeted localization of carrier pixels in adaptively
+embedded stego images," DESSERT 2026 (under revision). Use the tag when citing numbers from that paper.
+
 ## Install
 
 ```bash
